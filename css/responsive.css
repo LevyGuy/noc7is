@@ -1,0 +1,314 @@
+/* Responsive Styles */
+
+/* ============================================
+   Mobile (< 768px)
+   ============================================ */
+@media (max-width: 767px) {
+    :root {
+        --header-height: 48px;
+        --list-width: calc(100vw - 32px);
+    }
+
+    /* Login */
+    .login__card {
+        padding: var(--space-lg);
+    }
+
+    .login__title {
+        font-size: var(--font-xl);
+    }
+
+    /* Gallery */
+    .gallery {
+        padding: var(--space-md);
+    }
+
+    .gallery__title {
+        font-size: var(--font-xl);
+    }
+
+    .gallery__grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Header */
+    .header {
+        padding: 0 var(--space-sm);
+    }
+
+    .header__title {
+        font-size: var(--font-md);
+    }
+
+    .header__save-status {
+        display: none;
+    }
+
+    /* Board */
+    .board {
+        padding: var(--space-sm);
+    }
+
+    .board__canvas {
+        gap: var(--space-sm);
+        scroll-snap-type: x mandatory;
+    }
+
+    .board__list-wrapper {
+        scroll-snap-align: center;
+    }
+
+    /* List */
+    .list {
+        max-height: calc(100vh - var(--header-height) - 60px);
+    }
+
+    /* Modal */
+    .modal-backdrop {
+        padding: 0;
+        align-items: flex-end;
+    }
+
+    .modal {
+        max-width: 100%;
+        max-height: 90vh;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    }
+
+    /* Toast */
+    .toast-container {
+        left: var(--space-md);
+        right: var(--space-md);
+        bottom: var(--space-md);
+    }
+
+    .toast {
+        min-width: auto;
+        max-width: 100%;
+    }
+
+    /* Dropdown */
+    .dropdown-menu {
+        position: fixed;
+        left: var(--space-md) !important;
+        right: var(--space-md) !important;
+        bottom: var(--space-md) !important;
+        top: auto !important;
+        max-width: none;
+        border-radius: var(--radius-lg);
+    }
+
+    /* Folder Panel - Bottom sheet on mobile */
+    .folder-panel {
+        top: auto;
+        bottom: -100vh;
+        right: 0;
+        left: 0;
+        width: 100%;
+        max-width: 100%;
+        height: 85vh;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        transition: bottom 0.2s ease;
+    }
+
+    .folder-panel--visible {
+        right: 0;
+        bottom: 0;
+    }
+
+    /* Zoom Toggle Button */
+    .board__zoom-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: fixed;
+        bottom: var(--space-lg);
+        right: var(--space-lg);
+        width: 48px;
+        height: 48px;
+        border-radius: var(--radius-full);
+        background: var(--color-surface);
+        color: var(--color-primary);
+        font-size: 20px;
+        box-shadow: var(--shadow-lg);
+        z-index: var(--z-sticky);
+        border: 2px solid var(--color-primary);
+        transition: transform var(--transition-fast), background-color var(--transition-fast);
+    }
+
+    .board__zoom-toggle:active {
+        transform: scale(0.92);
+    }
+
+    .board__zoom-toggle--active {
+        background: var(--color-primary);
+        color: white;
+    }
+
+    /* Zoomed-out board state */
+    .board--zoomed-out {
+        overflow-x: auto;
+        overflow-y: auto;
+    }
+
+    .board--zoomed-out .board__canvas {
+        scroll-snap-type: none;
+    }
+
+    .board--zoomed-out .board__list-wrapper {
+        width: 140px;
+        scroll-snap-align: none;
+    }
+
+    .board--zoomed-out .board__new-list {
+        width: 140px;
+    }
+
+    .board--zoomed-out .list {
+        max-height: 50vh;
+        font-size: var(--font-xs);
+    }
+
+    .board--zoomed-out .list__header {
+        padding: var(--space-xs);
+    }
+
+    .board--zoomed-out .list__title {
+        font-size: 10px;
+    }
+
+    .board--zoomed-out .list__items {
+        padding: var(--space-xs);
+        min-height: 40px;
+    }
+
+    .board--zoomed-out .list__items:empty {
+        min-height: 40px;
+    }
+
+    .board--zoomed-out .item {
+        padding: 3px 6px;
+        margin-bottom: 3px;
+    }
+
+    .board--zoomed-out .item__title {
+        font-size: 9px;
+        line-height: 1.2;
+        display: -webkit-box;
+        -webkit-line-clamp: 1;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .board--zoomed-out .item__indicators {
+        display: none;
+    }
+
+    .board--zoomed-out .list__footer {
+        display: none;
+    }
+
+    .board--zoomed-out .list__menu {
+        font-size: 10px;
+        padding: 2px;
+    }
+
+    .board--zoomed-out .new-list-btn {
+        font-size: 10px;
+        padding: var(--space-sm);
+    }
+
+    /* Always show folder delete button on mobile (no hover) */
+    .item__folder-menu-btn {
+        opacity: 1;
+    }
+}
+
+/* ============================================
+   Tablet (768px - 1024px)
+   ============================================ */
+@media (min-width: 768px) and (max-width: 1023px) {
+    .gallery__grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* ============================================
+   Desktop (>= 1024px)
+   ============================================ */
+@media (min-width: 1024px) {
+    .gallery__grid {
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    }
+}
+
+/* ============================================
+   Touch Device Optimizations
+   ============================================ */
+@media (hover: none) {
+    /* Show menu buttons always on touch devices */
+    .dashboard-card__menu {
+        opacity: 1;
+    }
+
+    /* Larger touch targets */
+    .btn {
+        min-height: 44px;
+    }
+
+    .list__add-item {
+        min-height: 44px;
+    }
+
+    .dropdown-menu__item {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+    }
+
+    /* Disable hover effects */
+    .dashboard-card:hover {
+        transform: none;
+    }
+
+    .item:hover {
+        background: var(--color-surface);
+    }
+}
+
+/* ============================================
+   Reduced Motion
+   ============================================ */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* ============================================
+   Print Styles
+   ============================================ */
+@media print {
+    .header,
+    .toast-container,
+    .modal-backdrop {
+        display: none !important;
+    }
+
+    .board {
+        background: white;
+        height: auto;
+        overflow: visible;
+    }
+
+    .board__canvas {
+        flex-wrap: wrap;
+    }
+
+    .list {
+        break-inside: avoid;
+        max-height: none;
+    }
+}

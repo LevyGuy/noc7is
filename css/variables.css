@@ -1,0 +1,124 @@
+:root {
+    /* Colors - Light Theme */
+    --color-bg: #f4f5f7;
+    --color-bg-secondary: #ebecf0;
+    --color-surface: #ffffff;
+    --color-surface-hover: #f7f8f9;
+    --color-primary: #0079bf;
+    --color-primary-hover: #026aa7;
+    --color-primary-light: #e4f0f6;
+    --color-danger: #eb5a46;
+    --color-danger-hover: #cf513d;
+    --color-success: #61bd4f;
+    --color-warning: #f2d600;
+    --color-text: #172b4d;
+    --color-text-secondary: #5e6c84;
+    --color-text-subtle: #97a0af;
+    --color-border: #dfe1e6;
+    --color-border-light: #e4e6ea;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px rgba(9, 30, 66, 0.25);
+    --shadow-md: 0 4px 8px rgba(9, 30, 66, 0.15), 0 0 1px rgba(9, 30, 66, 0.31);
+    --shadow-lg: 0 8px 16px rgba(9, 30, 66, 0.15), 0 0 1px rgba(9, 30, 66, 0.31);
+    --shadow-drag: 0 12px 24px rgba(9, 30, 66, 0.25);
+
+    /* Spacing */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-xxl: 48px;
+
+    /* Border radius */
+    --radius-sm: 3px;
+    --radius-md: 6px;
+    --radius-lg: 12px;
+    --radius-full: 9999px;
+
+    /* Font sizes */
+    --font-xs: 0.75rem;
+    --font-sm: 0.875rem;
+    --font-md: 1rem;
+    --font-lg: 1.125rem;
+    --font-xl: 1.25rem;
+    --font-xxl: 1.5rem;
+
+    /* Font weights */
+    --font-normal: 400;
+    --font-medium: 500;
+    --font-semibold: 600;
+    --font-bold: 700;
+
+    /* Transitions */
+    --transition-fast: 100ms ease;
+    --transition-normal: 200ms ease;
+    --transition-slow: 300ms ease;
+
+    /* Z-index layers */
+    --z-dropdown: 100;
+    --z-sticky: 200;
+    --z-modal-backdrop: 300;
+    --z-modal: 400;
+    --z-drag-ghost: 500;
+    --z-toast: 600;
+
+    /* Tag colors */
+    --tag-red: #ef5350;
+    --tag-orange: #ff9800;
+    --tag-yellow: #ffeb3b;
+    --tag-green: #66bb6a;
+    --tag-teal: #26a69a;
+    --tag-blue: #42a5f5;
+    --tag-purple: #ab47bc;
+    --tag-pink: #ec407a;
+
+    /* Layout */
+    --header-height: 56px;
+    --list-width: 272px;
+    --list-max-height: calc(100vh - var(--header-height) - 80px);
+}
+
+/* Base styles */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    font-size: var(--font-md);
+    color: var(--color-text);
+    background-color: var(--color-bg);
+}
+
+/* Utility classes */
+.hidden {
+    display: none !important;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mb-md {
+    margin-bottom: var(--space-md);
+}
+
+.ml-sm {
+    margin-left: var(--space-sm);
+}
+
+.flex-wrap {
+    flex-wrap: wrap;
+}
