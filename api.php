@@ -10,38 +10,89 @@
  *   GET  ?action=load&user=xxx       - Load encrypted data
  */
 
+/**
+ * Load environment variables from .env into process env (if not already set)
+ */
+function loadEnvFile(string $envFile): void {
+    if (!file_exists($envFile)) {
+        return;
+    }
+
+    $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($lines === false) {
+        return;
+    }
+
+    foreach ($lines as $line) {
+        $trimmed = trim($line);
+        if ($trimmed === '' || strpos($trimmed, '#') === 0 || strpos($trimmed, '=') === false) {
+            continue;
+        }
+
+        [$name, $value] = explode('=', $line, 2);
+        $name = trim($name);
+        $value = trim($value, " \t\n\r\0\x0B\"'");
+
+        if ($name !== '' && getenv($name) === false) {
+            putenv("$name=$value");
+            $_ENV[$name] = $value;
+        }
+    }
+}
+
+/**
+ * Send JSON error before helper functions are defined later in the file
+ */
+function respondEarlyError(string $code, string $message, int $httpStatus): void {
+    http_response_code($httpStatus);
+    echo json_encode([
+        'error' => [
+            'code' => $code,
+            'message' => $message
+        ]
+    ]);
+    exit;
+}
+
+// Load .env before reading any BLINDBASE_* configuration.
+loadEnvFile(__DIR__ . '/.env');
+
 // =========================================================================
 // TASK 6: SECURITY HEADERS
 // =========================================================================
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
+header("Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+header('Referrer-Policy: no-referrer');
 header('Cache-Control: no-store, no-cache, must-revalidate');
 header('Pragma: no-cache');
 
 // =========================================================================
 // TASK 4: CORS CONFIGURATION
 // =========================================================================
-$allowedOrigins = getenv('BLINDBASE_ALLOWED_ORIGINS');
-if ($allowedOrigins) {
-    $origins = array_map('trim', explode(',', $allowedOrigins));
-    $requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
+$allowedOriginsRaw = getenv('BLINDBASE_ALLOWED_ORIGINS') ?: '';
+$allowedOrigins = array_values(array_filter(array_map('trim', explode(',', $allowedOriginsRaw))));
+$requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
 
-    if (in_array($requestOrigin, $origins, true)) {
-        header("Access-Control-Allow-Origin: $requestOrigin");
-        header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-        header('Access-Control-Allow-Headers: Content-Type');
-        header('Access-Control-Max-Age: 86400');
+if ($requestOrigin !== '') {
+    if (!in_array($requestOrigin, $allowedOrigins, true)) {
+        respondEarlyError('CORS_DENIED', 'Origin not allowed', 403);
     }
-} else {
-    // Development mode: allow all origins (disable in production!)
-    header('Access-Control-Allow-Origin: *');
+
+    header("Access-Control-Allow-Origin: $requestOrigin");
+    header('Vary: Origin');
     header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type');
+    header('Access-Control-Max-Age: 86400');
 }
 
 // Handle preflight OPTIONS requests
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    if ($requestOrigin === '' || !in_array($requestOrigin, $allowedOrigins, true)) {
+        respondEarlyError('CORS_DENIED', 'Origin not allowed', 403);
+    }
+
     http_response_code(204);
     exit;
 }
@@ -203,22 +254,7 @@ class RateLimiter {
 // =========================================================================
 // TASK 1: CONFIGURATION (Environment Variables)
 // =========================================================================
-
-// Load .env file if it exists (simple implementation)
-$envFile = __DIR__ . '/.env';
-if (file_exists($envFile)) {
-    $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    foreach ($lines as $line) {
-        if (strpos(trim($line), '#') === 0) continue; // Skip comments
-        if (strpos($line, '=') === false) continue;
-        list($name, $value) = explode('=', $line, 2);
-        $name = trim($name);
-        $value = trim($value, " \t\n\r\0\x0B\"'");
-        if (!getenv($name)) {
-            putenv("$name=$value");
-        }
-    }
-}
+// .env is loaded at the top of this file before any getenv() usage.
 
 // Get configuration from environment
 $serverSecretHex = getenv('BLINDBASE_SECRET');
