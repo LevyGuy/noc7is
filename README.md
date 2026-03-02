@@ -6,7 +6,7 @@ It allows you to manage tasks, projects, and ideas without ever exposing your da
 
 **The server is blind. Only you hold the key.**
 
-## ✨ Features
+## Features
 
 * ** Zero-Knowledge Architecture:** Data is encrypted with AES-256-GCM in your browser using a key derived from your password. The server (and database) only ever sees encrypted blobs.
 * ** Multi-Dashboard Support:** Create separate boards for Work, Home, or hobby projects.
@@ -59,6 +59,6 @@ The encryption key resides in your browser's memory (RAM) while you are logged i
 * Ensure Apache modules `mod_headers` and `mod_rewrite` are enabled so CSP and hardening headers are actually applied.
 
 
-## 📄 License
+## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
