@@ -76,10 +76,18 @@ class LandingComponent {
 
         return DOM.create('nav', { className: 'landing__nav' }, [
             DOM.create('div', { className: 'landing__nav-inner' }, [
-                DOM.create('span', {
+                DOM.create('button', {
                     className: 'landing__nav-brand',
-                    onClick: () => this._scrollTo('landing-hero')
-                }, ['noc7is']),
+                    onClick: () => this._scrollTo('landing-hero'),
+                    style: { border: 'none', background: 'none', padding: 0, cursor: 'pointer' }
+                }, [
+                    DOM.create('img', {
+                        src: 'logo.png',
+                        alt: 'noc7is logo',
+                        className: 'landing__nav-logo',
+                        style: { height: '40px', width: 'auto' }
+                    })
+                ]),
                 DOM.create('div', { className: 'landing__nav-links' }, [
                     ...navLinks.map(link =>
                         DOM.create('button', {
@@ -108,7 +116,13 @@ class LandingComponent {
     _createHero() {
         return DOM.create('section', { className: 'landing__hero', id: 'landing-hero' }, [
             DOM.create('div', { className: 'landing__container' }, [
-                DOM.create('h1', { className: 'landing__hero-title' }, ['noc7is']),
+                DOM.create('h1', { className: 'landing__hero-title', style: { margin: 0, marginBottom: 'var(--space-sm)' } }, [
+                    DOM.create('img', {
+                        src: 'logo.png',
+                        alt: 'noc7is logo',
+                        style: { height: '80px', width: 'auto', display: 'block', margin: '0 auto', borderRadius: '5px' }
+                    })
+                ]),
                 DOM.create('p', { className: 'landing__hero-tagline' }, [
                     'Your data, encrypted. Your privacy, protected.'
                 ]),
@@ -480,7 +494,12 @@ class LandingComponent {
         return DOM.create('footer', { className: 'landing__footer' }, [
             DOM.create('div', { className: 'landing__container' }, [
                 DOM.create('div', { className: 'landing__footer-inner' }, [
-                    DOM.create('span', { className: 'landing__footer-brand' }, ['noc7is']),
+                    DOM.create('img', {
+                        src: 'logo.png',
+                        alt: 'noc7is logo',
+                        className: 'landing__footer-brand',
+                        style: { height: '28px', width: 'auto' }
+                    }),
                     DOM.create('div', { className: 'landing__footer-links' }, [
                         DOM.create('button', {
                             className: 'landing__footer-link',
