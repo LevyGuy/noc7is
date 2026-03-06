@@ -57,7 +57,7 @@ class App {
         const app = document.getElementById('app');
         app.innerHTML = '';
 
-        new LoginComponent(app, async (username, password) => {
+        new LandingComponent(app, async (username, password) => {
             // Show loading overlay
             this._showLoading('Unlocking your vault...');
 
