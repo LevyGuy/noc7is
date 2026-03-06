@@ -120,7 +120,7 @@ class LandingComponent {
                     DOM.create('img', {
                         src: 'logo.png',
                         alt: 'noc7is logo',
-                        style: { height: '80px', width: 'auto', display: 'block', margin: '0 auto' }
+                        style: { height: '80px', width: 'auto', display: 'block', margin: '0 auto', borderRadius: '5px' }
                     })
                 ]),
                 DOM.create('p', { className: 'landing__hero-tagline' }, [
