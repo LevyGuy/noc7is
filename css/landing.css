@@ -54,6 +54,17 @@
     opacity: 0.8;
 }
 
+.landing__nav-logo {
+    display: block;
+    height: 40px;
+    width: auto;
+    transition: transform var(--transition-fast);
+}
+
+.landing__nav-brand:hover .landing__nav-logo {
+    transform: scale(1.05);
+}
+
 .landing__nav-links {
     display: flex;
     align-items: center;
@@ -201,6 +212,14 @@
 
 .landing__hero-btn--secondary:hover {
     background: rgba(255, 255, 255, 0.25);
+}
+
+.landing__hero-title img {
+    height: 80px;
+    width: auto;
+    display: block;
+    margin: 0 auto;
+    filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.15));
 }
 
 /* ============================================
@@ -459,9 +478,15 @@
 }
 
 .landing__footer-brand {
-    font-size: var(--font-lg);
-    font-weight: var(--font-bold);
-    color: white;
+    height: 28px;
+    width: auto;
+    display: block;
+    opacity: 0.9;
+    transition: opacity var(--transition-fast);
+}
+
+.landing__footer-brand:hover {
+    opacity: 1;
 }
 
 .landing__footer-links {
