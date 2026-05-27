@@ -19,13 +19,14 @@ class BlindBase {
      */
     constructor(apiUrl) {
         this.apiUrl = apiUrl;
-        this.key = null;      // Encryption key - stored in RAM only
+        this.key = null;        // Encryption key - stored in RAM only, never sent
+        this.authToken = null;  // Auth proof - derived from password, sent to authenticate
         this.username = null;
         this.salt = null;
 
         // Configuration
         this.config = {
-            pbkdf2Iterations: 100000,
+            pbkdf2Iterations: 600000,
             keyLength: 256,
             ivLength: 12,  // 96 bits for AES-GCM
         };
@@ -55,8 +56,11 @@ class BlindBase {
 
         this.salt = saltData.salt;
 
-        // Derive encryption key from password
-        this.key = await this._deriveKey(password, this.salt);
+        // Derive both the encryption key (never leaves the device) and an
+        // independent auth token (sent to the server to prove key possession).
+        const { key, authToken } = await this._deriveKeyAndAuth(password, this.salt);
+        this.key = key;
+        this.authToken = authToken;
 
         // Load existing data
         return this.load();
@@ -77,6 +81,7 @@ class BlindBase {
         const formData = new FormData();
         formData.append('user', this.username);
         formData.append('payload', encrypted);
+        formData.append('auth', this.authToken);
 
         const response = await this._fetch(`${this.apiUrl}?action=save`, {
             method: 'POST',
@@ -94,7 +99,7 @@ class BlindBase {
     async load() {
         this._requireUnlocked();
 
-        const response = await this._fetch(`${this.apiUrl}?action=load&user=${encodeURIComponent(this.username)}`);
+        const response = await this._fetch(`${this.apiUrl}?action=load&user=${encodeURIComponent(this.username)}&auth=${encodeURIComponent(this.authToken)}`);
         const result = await this._handleResponse(response);
 
         if (!result.data) {
@@ -115,6 +120,7 @@ class BlindBase {
      */
     logout() {
         this.key = null;
+        this.authToken = null;
         this.username = null;
         this.salt = null;
         location.reload();
@@ -150,10 +156,19 @@ class BlindBase {
     // =========================================================================
 
     /**
-     * Derive an AES-256-GCM key from password using PBKDF2
+     * Derive an AES-256-GCM encryption key and an independent auth token from
+     * the password using PBKDF2.
+     *
+     * PBKDF2 produces 512 bits = two independent 32-byte blocks. The first
+     * block becomes the (non-exportable) encryption key and never leaves the
+     * device; the second block is the auth token sent to the server to prove
+     * password knowledge. Because the blocks are independent HMAC outputs,
+     * the auth token reveals nothing about the encryption key without the
+     * password, so disclosing it to the server (or a storage leak of its
+     * hash) does not weaken the encryption.
      * @private
      */
-    async _deriveKey(password, saltHex) {
+    async _deriveKeyAndAuth(password, saltHex) {
         const encoder = new TextEncoder();
 
         // Import password as key material
@@ -162,14 +177,14 @@ class BlindBase {
             encoder.encode(password),
             'PBKDF2',
             false,
-            ['deriveKey']
+            ['deriveBits']
         );
 
         // Convert hex salt to Uint8Array
         const salt = this._hexToBytes(saltHex);
 
-        // Derive the AES-GCM key
-        return window.crypto.subtle.deriveKey(
+        // Derive 512 bits: [0..32) encryption key, [32..64) auth token
+        const bits = await window.crypto.subtle.deriveBits(
             {
                 name: 'PBKDF2',
                 salt: salt,
@@ -177,10 +192,22 @@ class BlindBase {
                 hash: 'SHA-256'
             },
             keyMaterial,
+            512
+        );
+
+        const derived = new Uint8Array(bits);
+        const keyBytes = derived.slice(0, 32);
+        const authBytes = derived.slice(32, 64);
+
+        const key = await window.crypto.subtle.importKey(
+            'raw',
+            keyBytes,
             { name: 'AES-GCM', length: this.config.keyLength },
             false,  // Key cannot be exported (security)
             ['encrypt', 'decrypt']
         );
+
+        return { key, authToken: this._bytesToHex(authBytes) };
     }
 
     /**
@@ -246,6 +273,16 @@ class BlindBase {
             bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
         }
         return bytes;
+    }
+
+    /**
+     * Convert a byte array to a hex string
+     * @private
+     */
+    _bytesToHex(bytes) {
+        return Array.from(bytes)
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
     }
 
     /**
