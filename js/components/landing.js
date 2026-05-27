@@ -6,12 +6,11 @@ class LandingComponent {
     /**
      * Create landing page
      * @param {HTMLElement} container - Container element
-     * @param {Function} onLogin - Callback when login succeeds
+     * @param {Function} onLoginClick - Callback to navigate to the login page
      */
-    constructor(container, onLogin) {
+    constructor(container, onLoginClick) {
         this.container = container;
-        this.onLogin = onLogin;
-        this.isLoading = false;
+        this.onLoginClick = onLoginClick;
         this._mobileMenuOpen = false;
         this._cleanups = [];
 
@@ -31,7 +30,6 @@ class LandingComponent {
             this._createScreenshots(),
             this._createAbout(),
             this._createContact(),
-            this._createLoginSection(),
             this._createPrivacy(),
             this._createTerms(),
             this._createFooter()
@@ -68,8 +66,8 @@ class LandingComponent {
             DOM.create('button', {
                 className: 'landing__nav-link landing__nav-link--cta',
                 onClick: () => {
-                    this._scrollTo('landing-login');
                     this._closeMobileMenu();
+                    this.onLoginClick();
                 }
             }, ['Login'])
         ]);
@@ -97,7 +95,7 @@ class LandingComponent {
                     ),
                     DOM.create('button', {
                         className: 'landing__nav-link landing__nav-link--cta',
-                        onClick: () => this._scrollTo('landing-login')
+                        onClick: () => this.onLoginClick()
                     }, ['Login'])
                 ]),
                 DOM.create('button', {
@@ -132,7 +130,7 @@ class LandingComponent {
                 DOM.create('div', { className: 'landing__hero-actions' }, [
                     DOM.create('button', {
                         className: 'landing__hero-btn landing__hero-btn--primary',
-                        onClick: () => this._scrollTo('landing-login')
+                        onClick: () => this.onLoginClick()
                     }, ['Get Started']),
                     DOM.create('button', {
                         className: 'landing__hero-btn landing__hero-btn--secondary',
@@ -281,71 +279,6 @@ class LandingComponent {
                         target: '_blank',
                         rel: 'noopener noreferrer'
                     }, ['@levyguy on X'])
-                ])
-            ])
-        ]);
-    }
-
-    // =========================================
-    // Login Section
-    // =========================================
-
-    _createLoginSection() {
-        return DOM.create('section', {
-            className: 'landing__section landing__section--alt',
-            id: 'landing-login'
-        }, [
-            DOM.create('div', { className: 'landing__container' }, [
-                DOM.create('h2', { className: 'landing__section-title' }, ['Unlock Your Vault']),
-                DOM.create('p', { className: 'landing__section-subtitle' }, [
-                    'Enter your credentials to access your encrypted boards. New username? A vault will be created automatically.'
-                ]),
-                DOM.create('div', { className: 'landing__login-wrapper' }, [
-                    DOM.create('div', { className: 'landing__login-card' }, [
-                        DOM.create('form', {
-                            className: 'login__form',
-                            id: 'login-form',
-                            onSubmit: (e) => this._handleSubmit(e)
-                        }, [
-                            DOM.create('div', { className: 'form-group' }, [
-                                DOM.create('label', { className: 'form-label', for: 'username' }, ['Username']),
-                                DOM.create('input', {
-                                    className: 'form-input',
-                                    type: 'text',
-                                    id: 'username',
-                                    placeholder: 'Enter username (lowercase)',
-                                    autocomplete: 'username',
-                                    required: 'true'
-                                })
-                            ]),
-                            DOM.create('div', { className: 'form-group' }, [
-                                DOM.create('label', { className: 'form-label', for: 'password' }, ['Password']),
-                                DOM.create('input', {
-                                    className: 'form-input',
-                                    type: 'password',
-                                    id: 'password',
-                                    placeholder: 'Enter your password',
-                                    autocomplete: 'current-password',
-                                    required: 'true'
-                                })
-                            ]),
-                            DOM.create('button', {
-                                className: 'btn btn--primary btn--lg btn--block',
-                                type: 'submit',
-                                id: 'login-btn'
-                            }, [
-                                DOM.create('span', { id: 'login-text' }, ['Unlock Vault']),
-                                DOM.create('span', { id: 'login-loading', className: 'hidden' }, [
-                                    DOM.create('span', { className: 'spinner' }),
-                                    ' Unlocking...'
-                                ])
-                            ]),
-                            DOM.create('p', { className: 'login__error hidden', id: 'login-error' })
-                        ]),
-                        DOM.create('p', { className: 'login__info' }, [
-                            'Your password never leaves your device. It is used to derive an encryption key locally. If you forget your password, your data cannot be recovered.'
-                        ])
-                    ])
                 ])
             ])
         ]);
@@ -573,64 +506,6 @@ class LandingComponent {
             content: img,
             closeOnBackdrop: true
         });
-    }
-
-    // =========================================
-    // Login Form Handling
-    // =========================================
-
-    async _handleSubmit(e) {
-        e.preventDefault();
-
-        if (this.isLoading) return;
-
-        const username = document.getElementById('username').value.trim().toLowerCase();
-        const password = document.getElementById('password').value;
-        const errorEl = document.getElementById('login-error');
-        const loginText = document.getElementById('login-text');
-        const loginLoading = document.getElementById('login-loading');
-        const loginBtn = document.getElementById('login-btn');
-
-        // Validate
-        if (!username || !password) {
-            this._showError('Please enter both username and password.');
-            return;
-        }
-
-        if (username.length < 3) {
-            this._showError('Username must be at least 3 characters.');
-            return;
-        }
-
-        if (!/^[a-z0-9_]+$/.test(username)) {
-            this._showError('Username can only contain lowercase letters, numbers, and underscores.');
-            return;
-        }
-
-        // Show loading state
-        this.isLoading = true;
-        DOM.hide(loginText);
-        DOM.show(loginLoading);
-        DOM.hide(errorEl);
-        loginBtn.disabled = true;
-
-        try {
-            await this.onLogin(username, password);
-        } catch (error) {
-            this._showError(error.message || 'Login failed. Please try again.');
-            this.isLoading = false;
-            DOM.show(loginText);
-            DOM.hide(loginLoading);
-            loginBtn.disabled = false;
-        }
-    }
-
-    _showError(message) {
-        const errorEl = document.getElementById('login-error');
-        if (errorEl) {
-            Sanitize.text(errorEl, message);
-            DOM.show(errorEl);
-        }
     }
 
     // =========================================

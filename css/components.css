@@ -261,6 +261,24 @@
     text-align: center;
 }
 
+.login__back {
+    display: block;
+    width: 100%;
+    margin-top: var(--space-md);
+    padding: var(--space-xs);
+    font-size: var(--font-sm);
+    color: var(--color-text-secondary);
+    text-align: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: color var(--transition-fast);
+}
+
+.login__back:hover {
+    color: var(--color-text);
+}
+
 /* ============================================
    Dashboard Card
    ============================================ */

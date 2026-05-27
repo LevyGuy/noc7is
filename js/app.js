@@ -17,14 +17,15 @@ class App {
      * Initialize the application
      */
     async init() {
-        this._renderLogin();
+        router.start();
     }
 
     /**
      * Set up router
      */
     _setupRouter() {
-        router.register('/', () => this._showDashboardGallery());
+        router.register('/', () => this._showHome());
+        router.register('/login', () => this._showLogin());
         router.register('/board/:id', (params) => this._showBoard(params.id));
     }
 
@@ -51,13 +52,37 @@ class App {
     }
 
     /**
-     * Render the login screen
+     * Show the home/landing page
      */
-    _renderLogin() {
+    _showHome() {
+        if (this.store) {
+            this._showDashboardGallery();
+            return;
+        }
+
+        this._destroyCurrentView();
+
         const app = document.getElementById('app');
         app.innerHTML = '';
 
-        new LandingComponent(app, async (username, password) => {
+        this.currentView = new LandingComponent(app, () => router.navigate('/login'));
+    }
+
+    /**
+     * Render the dedicated login page
+     */
+    _showLogin() {
+        if (this.store) {
+            router.navigate('/');
+            return;
+        }
+
+        this._destroyCurrentView();
+
+        const app = document.getElementById('app');
+        app.innerHTML = '';
+
+        this.currentView = new LoginComponent(app, async (username, password) => {
             // Show loading overlay
             this._showLoading('Unlocking your vault...');
 
@@ -68,7 +93,7 @@ class App {
                 this.store.init(data);
 
                 this._hideLoading();
-                router.start();
+                router.navigate('/');
 
                 Toast.success('Vault unlocked successfully!');
             } catch (error) {
@@ -83,7 +108,7 @@ class App {
      */
     _showDashboardGallery() {
         if (!this.store) {
-            this._renderLogin();
+            router.navigate('/login');
             return;
         }
 

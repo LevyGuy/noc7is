@@ -75,7 +75,13 @@ class LoginComponent {
 
                 DOM.create('p', { className: 'login__info' }, [
                     'Your password never leaves your device. It is used to derive an encryption key locally. If you forget your password, your data cannot be recovered.'
-                ])
+                ]),
+
+                DOM.create('button', {
+                    className: 'login__back',
+                    type: 'button',
+                    onClick: () => router.navigate('/')
+                }, ['← Back to home'])
             ])
         ]);
 

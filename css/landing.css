@@ -410,21 +410,6 @@
 }
 
 /* ============================================
-   Login Section
-   ============================================ */
-.landing__login-wrapper {
-    max-width: 400px;
-    margin: 0 auto;
-}
-
-.landing__login-card {
-    background: var(--color-surface);
-    border-radius: var(--radius-lg);
-    padding: var(--space-xl);
-    box-shadow: var(--shadow-lg);
-}
-
-/* ============================================
    Legal Sections
    ============================================ */
 .landing__legal {
