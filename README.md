@@ -42,19 +42,37 @@ It allows you to manage tasks, projects, and ideas without ever exposing your da
 * **Database:** Flat JSON files (default) or MySQL (adaptable via BlindBase).
 
 
+## Security Model
+
+Authentication and encryption are both derived from your password, client-side:
+
+* PBKDF2-HMAC-SHA256 (600,000 iterations) stretches your password into 512 bits.
+* The first half becomes a non-exportable AES-256-GCM **encryption key** that never leaves your browser.
+* The second half is an **auth token** sent to the server to prove you know the password. The server stores only a hash of it and verifies it (constant-time) before any read or write. Because the two halves are independent PBKDF2 blocks, the auth token reveals nothing about the encryption key without the password.
+
+This means a request cannot read or overwrite another account's vault without the password, and a leak of the server's stored files (verifier hashes + ciphertext) is no easier to crack than the encrypted data itself.
+
+### What zero-knowledge does and does not protect
+
+* **Protected:** A passive/honest server operator never sees your password, encryption key, or plaintext. A theft of the storage files alone does not reveal your data (it remains encrypted, and the per-user salt is not even stored — it is derived from the server secret).
+* **Not protected:** Because the cryptography runs in JavaScript served by the same server, an **active, malicious, or compromised server can ship tampered code that captures your password on login**. This is inherent to all browser-delivered end-to-end encryption. Serve over HTTPS only, keep the deployment trusted, and review the source you deploy.
+
 ## Important Security Notice
 
 **1. No Password Reset**
 Because Noc7is is a Zero-Knowledge application, your password is your encryption key. **If you lose your password, your data is mathematically irretrievable.** There is no "Forgot Password" link.
 
-**2. XSS Vulnerability**
+**2. XSS Sensitivity**
 The encryption key resides in your browser's memory (RAM) while you are logged in. This makes the application sensitive to Cross-Site Scripting (XSS).
 * Do not install browser extensions you do not trust.
 * If you modify the source code, ensure you maintain a strict Content Security Policy (CSP).
 
-**3. Production Hardening Checklist**
+**3. The `BLINDBASE_SECRET` is critical and not rotatable**
+This server secret is used for the second (server-side) encryption layer **and** to derive each user's salt. Losing or changing it makes every existing vault permanently unreadable — there is no built-in rotation path. Back it up securely and treat it as un-rotatable in production.
+
+**4. Production Hardening Checklist**
 * Set `BLINDBASE_ALLOWED_ORIGINS` in `.env` to your exact origin (example: `https://noc7is.com`).
-* Keep `.env` and `.git` inaccessible from the web (root `.htaccess` enforces this on Apache).
+* Keep `.env`, `.git`, and `storage/` inaccessible from the web. The bundled `.htaccess` files enforce this **on Apache only** — if you deploy behind **nginx, Caddy, or another server you must replicate these denials yourself**, or `storage/*.json` and `.env` may be served directly.
 * Serve only over HTTPS and keep HSTS enabled.
 * Ensure Apache modules `mod_headers` and `mod_rewrite` are enabled so CSP and hardening headers are actually applied.
 

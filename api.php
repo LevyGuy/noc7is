@@ -178,6 +178,45 @@ function validatePayload(?string $payload, int $maxSizeMB): array {
     return ['valid' => true];
 }
 
+/**
+ * Validate the auth token format (64 hex chars = 32 bytes, derived client-side)
+ */
+function validateAuthToken(?string $auth): array {
+    if (!$auth || trim($auth) === '') {
+        return ['valid' => false, 'code' => 'AUTH_REQUIRED', 'message' => 'Authentication token is required'];
+    }
+
+    $auth = trim($auth);
+
+    if (!preg_match('/^[a-f0-9]{64}$/', $auth)) {
+        return ['valid' => false, 'code' => 'AUTH_FAILED', 'message' => 'Invalid username or password'];
+    }
+
+    return ['valid' => true, 'auth' => $auth];
+}
+
+/**
+ * Derive a per-user salt deterministically from the username and server secret.
+ *
+ * The salt is never stored: it is recomputed on demand, so a storage-only leak
+ * does not reveal it (the server secret is required), and the salt endpoint
+ * cannot be used to enumerate accounts or exhaust storage.
+ */
+function deriveSalt(string $user, string $secretKeyBin): string {
+    return substr(hash_hmac('sha256', 'salt:' . $user, $secretKeyBin), 0, 32);
+}
+
+/**
+ * Compute the stored verifier for a client auth token.
+ *
+ * The token is high-entropy (PBKDF2 output), so a fast hash is sufficient:
+ * recovering the token from the verifier is as hard as cracking the password
+ * through the client's PBKDF2 work factor.
+ */
+function authVerifier(string $authToken): string {
+    return hash('sha256', $authToken);
+}
+
 // =========================================================================
 // TASK 5: RATE LIMITING
 // =========================================================================
@@ -333,31 +372,9 @@ if ($action === 'get_salt') {
     }
     $user = $validation['username'];
 
-    $file = $STORAGE_DIR . $user . '.json';
-
-    if (file_exists($file)) {
-        // User exists, return their specific salt
-        $data = json_decode(file_get_contents($file), true);
-        if (!$data || !isset($data['salt'])) {
-            respondError('DATA_CORRUPTED', 'User data is corrupted', 500);
-        }
-        respondSuccess(['salt' => $data['salt']]);
-    } else {
-        // New user: Generate a new random salt and save it
-        $salt = bin2hex(random_bytes(16)); // 16 bytes = 32 hex chars
-        $initialData = [
-            'salt' => $salt,
-            'encrypted_blob' => null,
-            'created_at' => date('c'),
-            'updated_at' => null
-        ];
-
-        if (!@file_put_contents($file, json_encode($initialData), LOCK_EX)) {
-            respondError('STORAGE_ERROR', 'Unable to create user record', 500);
-        }
-
-        respondSuccess(['salt' => $salt, 'new_user' => true]);
-    }
+    // Salt is deterministic: no storage I/O, no account creation, and the
+    // response is identical whether or not the account exists.
+    respondSuccess(['salt' => deriveSalt($user, $SERVER_SECRET_KEY)]);
 }
 
 // =========================================================================
@@ -376,6 +393,14 @@ if ($action === 'save') {
     }
     $user = $validation['username'];
 
+    // Validate auth token
+    $authValidation = validateAuthToken($_POST['auth'] ?? null);
+    if (!$authValidation['valid']) {
+        respondError($authValidation['code'], $authValidation['message'],
+            $authValidation['code'] === 'AUTH_REQUIRED' ? 401 : 403);
+    }
+    $auth = $authValidation['auth'];
+
     // Validate payload
     $payloadValidation = validatePayload($_POST['payload'] ?? null, $MAX_PAYLOAD_MB);
     if (!$payloadValidation['valid']) {
@@ -385,8 +410,24 @@ if ($action === 'save') {
     $clientPayload = $_POST['payload'];
 
     $file = $STORAGE_DIR . $user . '.json';
-    if (!file_exists($file)) {
-        respondError('USER_NOT_FOUND', 'User does not exist. Call get_salt first.', 404);
+
+    if (file_exists($file)) {
+        // Existing account: caller must prove knowledge of the password.
+        $data = json_decode(file_get_contents($file), true);
+        if (!$data || !isset($data['verifier'])) {
+            respondError('DATA_CORRUPTED', 'User data is corrupted', 500);
+        }
+        if (!hash_equals($data['verifier'], authVerifier($auth))) {
+            respondError('AUTH_FAILED', 'Invalid username or password', 403);
+        }
+    } else {
+        // First write registers the account and binds the verifier.
+        $data = [
+            'verifier' => authVerifier($auth),
+            'encrypted_blob' => null,
+            'created_at' => date('c'),
+            'updated_at' => null
+        ];
     }
 
     // Layer 2 Encryption (Server Side)
@@ -395,12 +436,6 @@ if ($action === 'save') {
 
     // Encode for storage (Nonce + Ciphertext)
     $storedBlob = base64_encode($nonce . $layer2_ciphertext);
-
-    // Update storage
-    $data = json_decode(file_get_contents($file), true);
-    if (!$data) {
-        respondError('DATA_CORRUPTED', 'User data is corrupted', 500);
-    }
 
     $data['encrypted_blob'] = $storedBlob;
     $data['updated_at'] = date('c');
@@ -423,16 +458,29 @@ if ($action === 'load') {
     }
     $user = $validation['username'];
 
+    // Validate auth token
+    $authValidation = validateAuthToken($_GET['auth'] ?? null);
+    if (!$authValidation['valid']) {
+        respondError($authValidation['code'], $authValidation['message'],
+            $authValidation['code'] === 'AUTH_REQUIRED' ? 401 : 403);
+    }
+    $auth = $authValidation['auth'];
+
     $file = $STORAGE_DIR . $user . '.json';
 
     if (!file_exists($file)) {
-        // User doesn't exist - return null data (not an error for new users)
+        // Not registered yet - return null data (first save will register)
         respondSuccess(['data' => null]);
     }
 
     $data = json_decode(file_get_contents($file), true);
-    if (!$data) {
+    if (!$data || !isset($data['verifier'])) {
         respondError('DATA_CORRUPTED', 'User data is corrupted', 500);
+    }
+
+    // Caller must prove knowledge of the password before any blob is returned.
+    if (!hash_equals($data['verifier'], authVerifier($auth))) {
+        respondError('AUTH_FAILED', 'Invalid username or password', 403);
     }
 
     if (empty($data['encrypted_blob'])) {
