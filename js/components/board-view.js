@@ -631,6 +631,47 @@ class BoardViewComponent {
     }
 
     /**
+     * Scroll to and highlight a search target (item or list), opening the
+     * item detail / folder panel when the target is a card.
+     * @param {Object} target - { listId, itemId, isFolder, openItem }
+     */
+    focusTarget(target) {
+        if (!target) return;
+
+        // Wait a beat for the board to finish rendering / scroll restoration
+        setTimeout(() => {
+            const { itemId, listId, isFolder, openItem } = target;
+
+            let el = null;
+            if (itemId) {
+                el = this.container.querySelector(`.item[data-item-id="${itemId}"]`);
+            }
+            if (!el && listId) {
+                el = this.container.querySelector(`.board__list-wrapper[data-list-id="${listId}"]`);
+            }
+
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+                el.classList.add('search-highlight');
+                setTimeout(() => el.classList.remove('search-highlight'), 2200);
+            }
+
+            // Open the matching card so the full content is visible. This also
+            // covers sub-items that live inside a folder (not shown on the board).
+            if (itemId && openItem) {
+                const item = this.store.getItem(itemId);
+                if (!item) return;
+                if (isFolder || item.type === 'folder') {
+                    const containingListId = this.store.findListContainingItem(itemId) || listId;
+                    this._openFolderPanel(itemId, containingListId);
+                } else {
+                    this._openItemModal(itemId);
+                }
+            }
+        }, 150);
+    }
+
+    /**
      * Clean up component
      */
     destroy() {

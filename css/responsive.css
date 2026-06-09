@@ -44,6 +44,15 @@
         display: none;
     }
 
+    /* Collapse search button to just the icon on small screens */
+    .header__search-label {
+        display: none;
+    }
+
+    .search-overlay {
+        padding: var(--space-md) var(--space-sm) var(--space-sm);
+    }
+
     /* Board */
     .board {
         padding: var(--space-sm);
