@@ -8,9 +8,12 @@ class App {
         this.store = null;
         this.currentView = null;
         this.headerComponent = null;
+        this.searchComponent = null;
+        this._pendingHighlight = null;
 
         this._setupRouter();
         this._setupErrorHandling();
+        this._setupGlobalShortcuts();
     }
 
     /**
@@ -127,6 +130,7 @@ class App {
         this.headerComponent = new HeaderComponent(document.getElementById('header'), {
             title: 'noc7is',
             showBack: false,
+            onSearch: () => this._openSearch(),
             onLogout: () => this._logout()
         });
 
@@ -171,6 +175,7 @@ class App {
             showBack: true,
             editableTitle: true,
             onBack: () => router.navigate('/'),
+            onSearch: () => this._openSearch(),
             onTitleChange: (newTitle) => {
                 this.store.updateDashboard(dashboardId, { title: newTitle });
                 Toast.success('Dashboard renamed!');
@@ -185,6 +190,9 @@ class App {
             dashboardId
         );
 
+        // Apply a pending highlight if we navigated here from search
+        this._applyPendingHighlight();
+
         // Update header when dashboard title changes
         this._dashboardUpdateUnsubscribe = this.store.subscribe((state) => {
             const updatedDashboard = this.store.getDashboard(dashboardId);
@@ -192,6 +200,74 @@ class App {
                 this.headerComponent.updateTitle(updatedDashboard.title);
             }
         });
+    }
+
+    /**
+     * Set up global keyboard shortcuts
+     */
+    _setupGlobalShortcuts() {
+        document.addEventListener('keydown', (e) => {
+            // Ctrl/Cmd+K opens search when logged in
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+                if (this.store) {
+                    e.preventDefault();
+                    this._openSearch();
+                }
+            }
+        });
+    }
+
+    /**
+     * Open the cross-board search overlay
+     */
+    _openSearch() {
+        if (!this.store) return;
+        if (this.searchComponent) return; // already open
+
+        this.searchComponent = new SearchComponent(this.store, {
+            onSelect: (result) => this._handleSearchResult(result),
+            onClose: () => { this.searchComponent = null; }
+        });
+    }
+
+    /**
+     * Navigate to a search result and queue a highlight
+     * @param {Object} result
+     */
+    _handleSearchResult(result) {
+        if (!result || !result.dashboardId) return;
+
+        this._pendingHighlight = {
+            dashboardId: result.dashboardId,
+            listId: result.listId || null,
+            itemId: result.itemId || null,
+            isFolder: !!result.isFolder,
+            openItem: result.type === 'item'
+        };
+
+        const onSameBoard =
+            router.getCurrentRoute() === '/board/:id' &&
+            router.getParams().id === result.dashboardId;
+
+        if (onSameBoard) {
+            // Hash won't change, so apply the highlight directly
+            this._applyPendingHighlight();
+        } else {
+            router.navigate(`/board/${result.dashboardId}`);
+        }
+    }
+
+    /**
+     * Apply a queued highlight to the current board view (if it matches)
+     */
+    _applyPendingHighlight() {
+        const target = this._pendingHighlight;
+        if (!target) return;
+        if (!(this.currentView instanceof BoardViewComponent)) return;
+        if (this.currentView.dashboardId !== target.dashboardId) return;
+
+        this._pendingHighlight = null;
+        this.currentView.focusTarget(target);
     }
 
     /**

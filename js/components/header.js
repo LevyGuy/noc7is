@@ -13,6 +13,7 @@ class HeaderComponent {
      * @param {Function} options.onBack - Back button callback
      * @param {Function} options.onTitleChange - Title change callback
      * @param {Function} options.onLogout - Logout callback
+     * @param {Function} options.onSearch - Search button callback
      */
     constructor(container, options = {}) {
         this.container = container;
@@ -23,6 +24,7 @@ class HeaderComponent {
             onBack: null,
             onTitleChange: null,
             onLogout: null,
+            onSearch: null,
             ...options
         };
 
@@ -54,9 +56,17 @@ class HeaderComponent {
             ].filter(Boolean)),
 
             DOM.create('div', { className: 'header__right' }, [
+                this.options.onSearch ? DOM.create('button', {
+                    className: 'header__search',
+                    id: 'header-search',
+                    title: 'Search all boards (Ctrl+K)'
+                }, [
+                    DOM.create('span', { className: 'header__search-icon' }, ['🔍']),
+                    DOM.create('span', { className: 'header__search-label' }, ['Search'])
+                ]) : null,
                 DOM.create('span', { className: 'header__save-status', id: 'save-status' }),
                 DOM.create('button', { className: 'header__logout', id: 'header-logout' }, ['Logout'])
-            ])
+            ].filter(Boolean))
         ]);
 
         this.container.appendChild(header);
@@ -76,6 +86,12 @@ class HeaderComponent {
         const logoutBtn = document.getElementById('header-logout');
         if (logoutBtn && this.options.onLogout) {
             logoutBtn.addEventListener('click', this.options.onLogout);
+        }
+
+        // Search button
+        const searchBtn = document.getElementById('header-search');
+        if (searchBtn && this.options.onSearch) {
+            searchBtn.addEventListener('click', this.options.onSearch);
         }
 
         // Editable title
