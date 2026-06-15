@@ -63,12 +63,7 @@ class App {
             return;
         }
 
-        this._destroyCurrentView();
-
-        const app = document.getElementById('app');
-        app.innerHTML = '';
-
-        this.currentView = new LandingComponent(app, () => router.navigate('/login'));
+        router.navigate('/login');
     }
 
     /**
