@@ -16,7 +16,10 @@
     <meta name="twitter:title" content="noc7is - Zero-Knowledge Encrypted Kanban">
     <meta name="twitter:description" content="A privacy-first, zero-knowledge Kanban board. Your data is encrypted in your browser. The server never sees your data.">
     <meta name="twitter:image" content="social-preview.jpg">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; media-src 'self'; manifest-src 'self'; form-action 'self'; frame-src 'none'; child-src 'none'; worker-src 'none'; upgrade-insecure-requests; block-all-mixed-content">
+    <!-- frame-ancestors is intentionally absent here: browsers only honor it
+         when the CSP arrives as an HTTP header, which .htaccess sends. This
+         meta copy is a fallback for servers that don't process .htaccess. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; media-src 'self'; manifest-src 'self'; form-action 'self'; frame-src 'none'; child-src 'none'; worker-src 'none'; upgrade-insecure-requests; block-all-mixed-content">
     <link rel="stylesheet" href="css/reset.css">
     <link rel="stylesheet" href="css/variables.css">
     <link rel="stylesheet" href="css/layout.css">
