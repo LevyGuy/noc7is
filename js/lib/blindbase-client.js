@@ -99,7 +99,11 @@ class BlindBase {
     async load() {
         this._requireUnlocked();
 
-        const response = await this._fetch(`${this.apiUrl}?action=load&user=${encodeURIComponent(this.username)}&auth=${encodeURIComponent(this.authToken)}`);
+        // Auth token is sent in a header (not the URL) so this credential is
+        // not captured in server access logs, browser history, or Referer.
+        const response = await this._fetch(`${this.apiUrl}?action=load&user=${encodeURIComponent(this.username)}`, {
+            headers: { 'X-Auth-Token': this.authToken }
+        });
         const result = await this._handleResponse(response);
 
         if (!result.data) {

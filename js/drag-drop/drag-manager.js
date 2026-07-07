@@ -220,6 +220,56 @@ class DragManager {
     }
 
     /**
+     * Find the visible item the drop point sits above (insert-before target)
+     * @param {HTMLElement} dropZone - The .list__items container
+     * @param {number} y - Drop clientY
+     * @returns {string|null} Item id to insert before, or null to append
+     */
+    _getDropBeforeItemId(dropZone, y) {
+        const items = dropZone.querySelectorAll('.item:not(.item--dragging)');
+        for (const item of items) {
+            const rect = item.getBoundingClientRect();
+            if (y < rect.top + rect.height / 2) {
+                return item.dataset.itemId;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Move the dragged item so it lands directly before beforeItemId (or at
+     * the end when null). Positions are resolved against the store's itemIds
+     * by id, because the DOM only shows a subset of that array (snoozed and
+     * soft-deleted items stay in itemIds but are not rendered), so a DOM
+     * index is not a valid store index.
+     * @param {string} fromListId
+     * @param {string} toListId
+     * @param {string|null} beforeItemId
+     */
+    _dropDraggedItem(fromListId, toListId, beforeItemId) {
+        if (fromListId === toListId) {
+            const list = this.store.getList(fromListId);
+            const oldIndex = list.itemIds.indexOf(this.draggedId);
+            if (oldIndex === -1) return;
+
+            // reorderItem removes first, so the insert index is relative to
+            // the array without the dragged item
+            const remaining = list.itemIds.filter(id => id !== this.draggedId);
+            let newIndex = beforeItemId ? remaining.indexOf(beforeItemId) : remaining.length;
+            if (newIndex === -1) newIndex = remaining.length;
+
+            if (oldIndex !== newIndex) {
+                this.store.reorderItem(fromListId, oldIndex, newIndex);
+            }
+        } else {
+            const toList = this.store.getList(toListId);
+            if (!toList) return;
+            const index = beforeItemId ? toList.itemIds.indexOf(beforeItemId) : -1;
+            this.store.moveItem(this.draggedId, fromListId, toListId, index === -1 ? undefined : index);
+        }
+    }
+
+    /**
      * Handle item drop
      */
     _handleItemDrop(e) {
@@ -245,31 +295,8 @@ class DragManager {
 
         if (!toListId || !fromListId) return;
 
-        // Calculate new index
-        const items = Array.from(dropZone.querySelectorAll('.item:not(.item--dragging)'));
-        let newIndex = items.length;
-
-        for (let i = 0; i < items.length; i++) {
-            const rect = items[i].getBoundingClientRect();
-            if (e.clientY < rect.top + rect.height / 2) {
-                newIndex = i;
-                break;
-            }
-        }
-
-        // Adjust index if moving within same list and moving down
-        if (fromListId === toListId) {
-            const list = this.store.getList(fromListId);
-            const oldIndex = list.itemIds.indexOf(this.draggedId);
-            if (oldIndex < newIndex) {
-                newIndex--;
-            }
-            if (oldIndex !== newIndex) {
-                this.store.reorderItem(fromListId, oldIndex, newIndex);
-            }
-        } else {
-            this.store.moveItem(this.draggedId, fromListId, toListId, newIndex);
-        }
+        const beforeItemId = this._getDropBeforeItemId(dropZone, e.clientY);
+        this._dropDraggedItem(fromListId, toListId, beforeItemId);
     }
 
     /**
@@ -294,36 +321,64 @@ class DragManager {
     }
 
     /**
+     * Find the visible list the drop point sits before (insert-before target)
+     * @param {number} x - Drop clientX
+     * @returns {string|null} List id to insert before, or null to append
+     */
+    _getDropBeforeListId(x) {
+        const canvas = this.container.querySelector('.board__canvas');
+        if (!canvas) return null;
+
+        const wrappers = canvas.querySelectorAll('.board__list-wrapper');
+        for (const wrapper of wrappers) {
+            if (wrapper.dataset.listId === this.draggedId) continue;
+            const rect = wrapper.getBoundingClientRect();
+            if (x < rect.left + rect.width / 2) {
+                return wrapper.dataset.listId;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Move the dragged list so it lands directly before beforeListId (or at
+     * the end when null). Positions are resolved against the dashboard's
+     * listIds by id, because the DOM only shows a subset of that array
+     * (snoozed and soft-deleted lists stay in listIds but are not rendered).
+     * @param {string|null} beforeListId
+     */
+    _dropDraggedList(beforeListId) {
+        const dashboard = this.store.getDashboard(this.dashboardId);
+        if (!dashboard) return;
+
+        const oldIndex = dashboard.listIds.indexOf(this.draggedId);
+        if (oldIndex === -1) return;
+
+        // reorderList removes first, so the insert index is relative to the
+        // array without the dragged list
+        const remaining = dashboard.listIds.filter(id => id !== this.draggedId);
+        let newIndex = beforeListId ? remaining.indexOf(beforeListId) : remaining.length;
+        if (newIndex === -1) newIndex = remaining.length;
+
+        if (oldIndex !== newIndex) {
+            this.store.reorderList(this.dashboardId, oldIndex, newIndex);
+        }
+    }
+
+    /**
      * Handle list drop
      */
     _handleListDrop(e) {
         if (!this.draggedId) return;
 
-        const canvas = this.container.querySelector('.board__canvas');
-        const wrappers = Array.from(canvas.querySelectorAll('.board__list-wrapper'));
-
-        const dashboard = this.store.getDashboard(this.dashboardId);
-        const oldIndex = dashboard.listIds.indexOf(this.draggedId);
-
-        let newIndex = wrappers.length - 1;
-        for (let i = 0; i < wrappers.length; i++) {
-            if (wrappers[i].dataset.listId === this.draggedId) continue;
-            const rect = wrappers[i].getBoundingClientRect();
-            if (e.clientX < rect.left + rect.width / 2) {
-                newIndex = i;
-                break;
-            }
-        }
-
-        // Adjust for removal
-        if (oldIndex < newIndex) newIndex--;
-
-        if (oldIndex !== newIndex && oldIndex >= 0) {
-            this.store.reorderList(this.dashboardId, oldIndex, newIndex);
-        }
+        const beforeListId = this._getDropBeforeListId(e.clientX);
+        this._dropDraggedList(beforeListId);
 
         // Reset opacity
-        wrappers.forEach(w => w.style.opacity = '1');
+        const canvas = this.container.querySelector('.board__canvas');
+        if (canvas) {
+            canvas.querySelectorAll('.board__list-wrapper').forEach(w => w.style.opacity = '1');
+        }
     }
 
     // =========================================================================
@@ -559,50 +614,11 @@ class DragManager {
 
             if (!toListId || !fromListId) return;
 
-            // Calculate new index
-            const items = Array.from(dropZone.querySelectorAll('.item:not(.item--dragging)'));
-            let newIndex = items.length;
-
-            for (let i = 0; i < items.length; i++) {
-                const rect = items[i].getBoundingClientRect();
-                if (y < rect.top + rect.height / 2) {
-                    newIndex = i;
-                    break;
-                }
-            }
-
-            if (fromListId === toListId) {
-                const list = this.store.getList(fromListId);
-                const oldIndex = list.itemIds.indexOf(this.draggedId);
-                if (oldIndex < newIndex) newIndex--;
-                if (oldIndex !== newIndex) {
-                    this.store.reorderItem(fromListId, oldIndex, newIndex);
-                }
-            } else {
-                this.store.moveItem(this.draggedId, fromListId, toListId, newIndex);
-            }
+            const beforeItemId = this._getDropBeforeItemId(dropZone, y);
+            this._dropDraggedItem(fromListId, toListId, beforeItemId);
         } else if (this.dragType === 'list') {
-            const canvas = this.container.querySelector('.board__canvas');
-            const wrappers = Array.from(canvas.querySelectorAll('.board__list-wrapper'));
-
-            const dashboard = this.store.getDashboard(this.dashboardId);
-            const oldIndex = dashboard.listIds.indexOf(this.draggedId);
-
-            let newIndex = wrappers.length - 1;
-            for (let i = 0; i < wrappers.length; i++) {
-                if (wrappers[i].dataset.listId === this.draggedId) continue;
-                const rect = wrappers[i].getBoundingClientRect();
-                if (x < rect.left + rect.width / 2) {
-                    newIndex = i;
-                    break;
-                }
-            }
-
-            if (oldIndex < newIndex) newIndex--;
-
-            if (oldIndex !== newIndex && oldIndex >= 0) {
-                this.store.reorderList(this.dashboardId, oldIndex, newIndex);
-            }
+            const beforeListId = this._getDropBeforeListId(x);
+            this._dropDraggedList(beforeListId);
         }
     }
 

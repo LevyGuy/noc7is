@@ -83,7 +83,7 @@ if ($requestOrigin !== '') {
     header("Access-Control-Allow-Origin: $requestOrigin");
     header('Vary: Origin');
     header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type');
+    header('Access-Control-Allow-Headers: Content-Type, X-Auth-Token');
     header('Access-Control-Max-Age: 86400');
 }
 
@@ -244,12 +244,21 @@ class RateLimiter {
         $file = $this->storageDir . md5($identifier) . '.json';
         $now = time();
 
+        // Open (creating if needed) and hold an exclusive lock across the whole
+        // read-modify-write so concurrent requests can't race past the limit.
+        $fh = @fopen($file, 'c+');
+        if ($fh === false) {
+            return true; // can't enforce; fail open rather than deny service
+        }
+        if (!flock($fh, LOCK_EX)) {
+            fclose($fh);
+            return true;
+        }
+
+        $content = stream_get_contents($fh);
         $data = ['requests' => [], 'window_start' => $now];
-        if (file_exists($file)) {
-            $content = @file_get_contents($file);
-            if ($content) {
-                $data = json_decode($content, true) ?: $data;
-            }
+        if ($content) {
+            $data = json_decode($content, true) ?: $data;
         }
 
         // Reset window if expired
@@ -258,19 +267,26 @@ class RateLimiter {
         }
 
         // Filter requests within current window
-        $data['requests'] = array_filter(
+        $data['requests'] = array_values(array_filter(
             $data['requests'] ?? [],
             fn($t) => $now - $t < $windowSeconds
-        );
+        ));
 
         // Check limit
         if (count($data['requests']) >= $limit) {
+            flock($fh, LOCK_UN);
+            fclose($fh);
             return false;
         }
 
         // Record this request
         $data['requests'][] = $now;
-        @file_put_contents($file, json_encode($data), LOCK_EX);
+        rewind($fh);
+        ftruncate($fh, 0);
+        fwrite($fh, json_encode($data));
+        fflush($fh);
+        flock($fh, LOCK_UN);
+        fclose($fh);
 
         return true;
     }
@@ -458,8 +474,10 @@ if ($action === 'load') {
     }
     $user = $validation['username'];
 
-    // Validate auth token
-    $authValidation = validateAuthToken($_GET['auth'] ?? null);
+    // Validate auth token. It is read from the X-Auth-Token header rather than
+    // a query parameter so this read-and-overwrite credential never lands in
+    // web server / proxy access logs, browser history, or Referer headers.
+    $authValidation = validateAuthToken($_SERVER['HTTP_X_AUTH_TOKEN'] ?? null);
     if (!$authValidation['valid']) {
         respondError($authValidation['code'], $authValidation['message'],
             $authValidation['code'] === 'AUTH_REQUIRED' ? 401 : 403);
