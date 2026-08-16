@@ -26,3 +26,6 @@ Thumbs.db
 
 # Node modules (if any added later)
 node_modules/
+.claude/
+screenshots_x/
+
