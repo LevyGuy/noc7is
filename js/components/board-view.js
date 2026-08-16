@@ -627,7 +627,7 @@ class BoardViewComponent {
             onMove: () => {
                 new MoveItemModal(this.store, itemId, this.dashboardId);
             }
-        });
+        }, { store: this.store });
     }
 
     /**

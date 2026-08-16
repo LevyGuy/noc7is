@@ -12,14 +12,25 @@ class ItemDetailModal {
      * @param {Function} callbacks.onSnooze - Called with timestamp when snoozing
      * @param {Function} callbacks.onUnsnooze - Called when removing snooze
      * @param {Function} callbacks.onMove - Called when move button is clicked
+     * @param {Object} [options] - Extra options
+     * @param {AppStore} [options.store] - Store used to suggest previously used tags
      */
     static TAG_COLORS = ['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink'];
 
-    constructor(item, callbacks = {}) {
+    constructor(item, callbacks = {}, options = {}) {
         this.item = item;
         this.callbacks = callbacks;
+        this.store = options.store || null;
         this._tags = ItemDetailModal.normalizeTags(item);
         this._activeColorPopup = null;
+
+        // Previously used tags, most used first (empty when no store is provided)
+        this._knownTags = (this.store && typeof this.store.getKnownTags === 'function')
+            ? this.store.getKnownTags()
+            : [];
+        this._suggestionsEl = null;
+        this._suggestionOptions = [];
+        this._highlightIndex = -1;
 
         this.show();
     }
@@ -123,6 +134,7 @@ class ItemDetailModal {
         this.modal = new Modal({
             title: 'Edit Item',
             content,
+            onClose: () => this._cleanup(),
             buttons: [
                 {
                     text: 'Delete',
@@ -165,12 +177,21 @@ class ItemDetailModal {
         };
         if (titleInput) titleInput.addEventListener('keydown', enterHandler);
 
-        // Close any color popup when clicking outside
+        // Close any color popup / tag suggestions when clicking outside
         document.addEventListener('mousedown', this._onDocumentClick = (e) => {
             if (this._activeColorPopup && !this._activeColorPopup.contains(e.target) && !e.target.classList.contains('tag-chip__color-dot')) {
                 this._closeColorPopup();
             }
+            if (this._suggestionsEl && !this._suggestionsEl.contains(e.target) &&
+                (!this._tagField || !this._tagField.contains(e.target))) {
+                this._closeSuggestions();
+            }
         });
+
+        // Keep the suggestions dropdown anchored to the input
+        this._onReposition = () => this._positionSuggestions();
+        window.addEventListener('resize', this._onReposition);
+        document.addEventListener('scroll', this._onReposition, true);
 
         // Focus title input
         setTimeout(() => {
@@ -180,26 +201,130 @@ class ItemDetailModal {
     }
 
     /**
-     * Render the tag chip input area
+     * Render the tag chip input area with the saved-tags dropdown
      * @returns {HTMLElement}
      */
     _renderTagInput() {
         this._tagInputWrapper = DOM.create('div', {
             className: 'tag-input-wrapper',
             onClick: () => {
-                const input = this._tagInputWrapper.querySelector('.tag-input-wrapper__input');
-                if (input) input.focus();
+                this._tagInput.focus();
+                this._openSuggestions();
             }
         });
 
+        this._tagInput = this._createTagInput();
+
+        // Toggle button to browse previously used tags
+        this._suggestToggle = DOM.create('button', {
+            className: 'tag-input-wrapper__toggle',
+            type: 'button',
+            title: 'Show previously used tags',
+            onClick: (e) => {
+                e.stopPropagation();
+                if (this._suggestionsEl) {
+                    this._closeSuggestions();
+                } else {
+                    this._tagInput.focus();
+                    this._openSuggestions(true);
+                }
+            }
+        }, ['▾']);
+
+        this._tagField = DOM.create('div', { className: 'tag-field' }, [this._tagInputWrapper]);
+
         this._refreshTagChips();
-        return this._tagInputWrapper;
+        return this._tagField;
+    }
+
+    /**
+     * Create the text input used to type new tags (created once, reused on refresh)
+     * @returns {HTMLInputElement}
+     */
+    _createTagInput() {
+        const input = DOM.create('input', {
+            className: 'tag-input-wrapper__input',
+            type: 'text',
+            autocomplete: 'off'
+        });
+
+        input.addEventListener('focus', () => this._openSuggestions());
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                if (!this._suggestionsEl) {
+                    this._openSuggestions(true);
+                    if (this._suggestionOptions.length > 0) {
+                        e.preventDefault();
+                        this._setHighlight(e.key === 'ArrowDown' ? 0 : this._suggestionOptions.length - 1);
+                    }
+                    return;
+                }
+                if (this._suggestionOptions.length > 0) {
+                    e.preventDefault();
+                    this._moveHighlight(e.key === 'ArrowDown' ? 1 : -1);
+                }
+                return;
+            }
+
+            if (e.key === 'Escape') {
+                if (this._suggestionsEl) {
+                    // Close the dropdown without closing the whole modal
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this._closeSuggestions();
+                }
+                return;
+            }
+
+            if (e.key === 'Enter' || e.key === ',') {
+                e.preventDefault();
+                const highlighted = this._getHighlightedSuggestion();
+                if (e.key === 'Enter' && highlighted) {
+                    this._selectSuggestion(highlighted);
+                } else {
+                    this._addTagFromInput(input);
+                }
+                return;
+            }
+
+            if (e.key === 'Tab') {
+                const highlighted = this._getHighlightedSuggestion();
+                if (highlighted) {
+                    e.preventDefault();
+                    this._selectSuggestion(highlighted);
+                } else if (input.value.trim()) {
+                    e.preventDefault();
+                    this._addTagFromInput(input);
+                }
+                return;
+            }
+
+            if (e.key === 'Backspace' && input.value === '' && this._tags.length > 0) {
+                this._tags.pop();
+                this._refreshTagChips();
+            }
+        });
+
+        // Handle typing (filters suggestions) and paste with commas
+        input.addEventListener('input', () => {
+            const val = input.value;
+            if (val.includes(',')) {
+                val.split(',').forEach(part => this._addTag(part, null, true));
+                input.value = '';
+                this._refreshTagChips();
+            }
+            this._openSuggestions();
+        });
+
+        return input;
     }
 
     /**
      * Rebuild the chip display inside the wrapper
      */
     _refreshTagChips() {
+        const hadFocus = document.activeElement === this._tagInput;
         this._tagInputWrapper.innerHTML = '';
 
         // Render each tag as a chip
@@ -230,46 +355,21 @@ class ItemDetailModal {
             this._tagInputWrapper.appendChild(chip);
         });
 
-        // Text input for adding new tags
-        const input = DOM.create('input', {
-            className: 'tag-input-wrapper__input',
-            type: 'text',
-            placeholder: this._tags.length === 0 ? 'Type a tag and press Enter or comma...' : 'Add more...'
-        });
+        // Text input for adding new tags (manual entry always available)
+        this._tagInput.placeholder = this._tags.length === 0
+            ? 'Type a tag and press Enter, or pick a saved one...'
+            : 'Add more...';
+        this._tagInputWrapper.appendChild(this._tagInput);
 
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ',') {
-                e.preventDefault();
-                this._addTagFromInput(input);
-            } else if (e.key === 'Tab') {
-                const val = input.value.trim();
-                if (val) {
-                    e.preventDefault();
-                    this._addTagFromInput(input);
-                }
-            } else if (e.key === 'Backspace' && input.value === '' && this._tags.length > 0) {
-                this._tags.pop();
-                this._refreshTagChips();
-            }
-        });
+        // Dropdown toggle, only useful when there are saved tags to browse
+        if (this._knownTags.length > 0) {
+            this._tagInputWrapper.appendChild(this._suggestToggle);
+        }
 
-        // Also handle paste with commas
-        input.addEventListener('input', () => {
-            const val = input.value;
-            if (val.includes(',')) {
-                const parts = val.split(',');
-                parts.forEach((part, i) => {
-                    const label = part.trim();
-                    if (label && !this._tags.some(t => t.label === label)) {
-                        this._tags.push({ color: null, label });
-                    }
-                });
-                input.value = '';
-                this._refreshTagChips();
-            }
-        });
+        if (hadFocus) this._tagInput.focus();
 
-        this._tagInputWrapper.appendChild(input);
+        // Keep the open dropdown in sync with the tags just added/removed
+        if (this._suggestionsEl) this._renderSuggestions();
     }
 
     /**
@@ -279,14 +379,211 @@ class ItemDetailModal {
     _addTagFromInput(input) {
         const label = input.value.replace(/,/g, '').trim();
         if (!label) return;
-        if (this._tags.some(t => t.label === label)) {
-            Toast.warning('Tag already exists.');
+        if (this._addTag(label)) {
             input.value = '';
-            return;
+            this._refreshTagChips();
+            this._openSuggestions();
+        } else {
+            input.value = '';
         }
-        this._tags.push({ color: null, label });
-        input.value = '';
+    }
+
+    /**
+     * Add a tag to the current item
+     * @param {string} label
+     * @param {string|null} [color=null]
+     * @param {boolean} [silent=false] - Skip the duplicate warning
+     * @returns {boolean} True if the tag was added
+     */
+    _addTag(label, color = null, silent = false) {
+        const trimmed = (label || '').trim();
+        if (!trimmed) return false;
+
+        if (this._hasTag(trimmed)) {
+            if (!silent) Toast.warning('Tag already exists.');
+            return false;
+        }
+
+        this._tags.push({ color: color || null, label: trimmed });
+        return true;
+    }
+
+    /**
+     * Check whether a label is already attached to this item (case-insensitive)
+     * @param {string} label
+     * @returns {boolean}
+     */
+    _hasTag(label) {
+        const key = (label || '').trim().toLowerCase();
+        return this._tags.some(t => (t.label || '').trim().toLowerCase() === key);
+    }
+
+    // =========================================================================
+    // TAG SUGGESTIONS DROPDOWN
+    // =========================================================================
+
+    /**
+     * Previously used tags that aren't on this item yet, filtered by typed text
+     * @returns {Array<{label: string, color: string|null, count: number}>}
+     */
+    _getSuggestions() {
+        const filter = (this._tagInput ? this._tagInput.value : '').trim().toLowerCase();
+
+        return this._knownTags.filter(tag => {
+            if (this._hasTag(tag.label)) return false;
+            if (!filter) return true;
+            return tag.label.toLowerCase().includes(filter);
+        });
+    }
+
+    /**
+     * Open (or refresh) the saved-tags dropdown
+     * @param {boolean} [force=false] - Open even when there is nothing to show
+     */
+    _openSuggestions(force = false) {
+        if (this._knownTags.length === 0 && !force) return;
+
+        if (!this._suggestionsEl) {
+            this._suggestionsEl = DOM.create('div', {
+                className: 'tag-suggestions',
+                // Keep focus in the input when interacting with the dropdown
+                onMouseDown: (e) => e.preventDefault()
+            });
+            document.body.appendChild(this._suggestionsEl);
+        }
+
+        this._renderSuggestions();
+    }
+
+    /**
+     * Render the dropdown contents for the current filter
+     */
+    _renderSuggestions() {
+        if (!this._suggestionsEl) return;
+
+        const suggestions = this._getSuggestions();
+        const typed = (this._tagInput ? this._tagInput.value : '').replace(/,/g, '').trim();
+
+        this._suggestionsEl.innerHTML = '';
+        this._suggestionOptions = [];
+        this._highlightIndex = -1;
+
+        suggestions.forEach(tag => {
+            const dotClass = tag.color ? ` tag-suggestions__dot--${tag.color}` : '';
+            const option = DOM.create('button', {
+                className: 'tag-suggestions__option',
+                type: 'button',
+                onClick: () => this._selectSuggestion(tag)
+            }, [
+                DOM.create('span', { className: `tag-suggestions__dot${dotClass}` }),
+                DOM.create('span', { className: 'tag-suggestions__label' }, [tag.label]),
+                tag.count > 0
+                    ? DOM.create('span', { className: 'tag-suggestions__count' }, [String(tag.count)])
+                    : null
+            ].filter(Boolean));
+
+            this._suggestionsEl.appendChild(option);
+            this._suggestionOptions.push({ el: option, tag });
+        });
+
+        // Always show how to add a brand new tag by hand
+        let hint = '';
+        if (suggestions.length === 0 && this._knownTags.length === 0) {
+            hint = 'No saved tags yet — type a tag and press Enter to create one.';
+        } else if (suggestions.length === 0 && typed) {
+            hint = `No match — press Enter to create "${typed}".`;
+        } else if (suggestions.length === 0) {
+            hint = 'All saved tags are already added.';
+        } else if (typed) {
+            hint = `Press Enter to create "${typed}" instead.`;
+        }
+
+        if (hint) {
+            this._suggestionsEl.appendChild(
+                DOM.create('div', { className: 'tag-suggestions__hint' }, [hint])
+            );
+        }
+
+        this._positionSuggestions();
+    }
+
+    /**
+     * Position the dropdown under the tag input (flips above when short on space)
+     */
+    _positionSuggestions() {
+        if (!this._suggestionsEl || !this._tagInputWrapper) return;
+
+        const rect = this._tagInputWrapper.getBoundingClientRect();
+        this._suggestionsEl.style.width = rect.width + 'px';
+        this._suggestionsEl.style.left = rect.left + 'px';
+        this._suggestionsEl.style.top = (rect.bottom + 4) + 'px';
+
+        const dropdownHeight = this._suggestionsEl.offsetHeight;
+        if (rect.bottom + 4 + dropdownHeight > window.innerHeight && rect.top - 4 - dropdownHeight > 0) {
+            this._suggestionsEl.style.top = (rect.top - 4 - dropdownHeight) + 'px';
+        }
+    }
+
+    /**
+     * Add a tag picked from the dropdown
+     * @param {{label: string, color: string|null}} tag
+     */
+    _selectSuggestion(tag) {
+        this._addTag(tag.label, tag.color);
+        this._tagInput.value = '';
+        this._tagInput.focus();
         this._refreshTagChips();
+        this._openSuggestions();
+    }
+
+    /**
+     * Get the currently highlighted suggestion, if any
+     * @returns {Object|null}
+     */
+    _getHighlightedSuggestion() {
+        if (this._highlightIndex < 0) return null;
+        const option = this._suggestionOptions[this._highlightIndex];
+        return option ? option.tag : null;
+    }
+
+    /**
+     * Move the keyboard highlight through the dropdown
+     * @param {number} delta
+     */
+    _moveHighlight(delta) {
+        const count = this._suggestionOptions.length;
+        if (count === 0) return;
+
+        let next = this._highlightIndex + delta;
+        if (next < 0) next = count - 1;
+        if (next >= count) next = 0;
+        this._setHighlight(next);
+    }
+
+    /**
+     * Highlight a specific suggestion
+     * @param {number} index
+     */
+    _setHighlight(index) {
+        this._suggestionOptions.forEach((option, i) => {
+            option.el.classList.toggle('tag-suggestions__option--active', i === index);
+        });
+        this._highlightIndex = index;
+
+        const active = this._suggestionOptions[index];
+        if (active) active.el.scrollIntoView({ block: 'nearest' });
+    }
+
+    /**
+     * Close the saved-tags dropdown
+     */
+    _closeSuggestions() {
+        if (this._suggestionsEl) {
+            this._suggestionsEl.remove();
+            this._suggestionsEl = null;
+        }
+        this._suggestionOptions = [];
+        this._highlightIndex = -1;
     }
 
     /**
@@ -296,6 +593,7 @@ class ItemDetailModal {
      */
     _showColorPopup(tagIndex, dotEl) {
         this._closeColorPopup();
+        this._closeSuggestions();
 
         const popup = DOM.create('div', { className: 'tag-chip__color-popup' });
 
@@ -344,6 +642,24 @@ class ItemDetailModal {
         });
 
         this._activeColorPopup = popup;
+    }
+
+    /**
+     * Tear down anything attached outside the modal (called on close)
+     */
+    _cleanup() {
+        this._closeColorPopup();
+        this._closeSuggestions();
+
+        if (this._onDocumentClick) {
+            document.removeEventListener('mousedown', this._onDocumentClick);
+            this._onDocumentClick = null;
+        }
+        if (this._onReposition) {
+            window.removeEventListener('resize', this._onReposition);
+            document.removeEventListener('scroll', this._onReposition, true);
+            this._onReposition = null;
+        }
     }
 
     /**
@@ -418,21 +734,12 @@ class ItemDetailModal {
         }
 
         // Also capture any text still in the input that hasn't been committed as a chip
-        const tagInput = this._tagInputWrapper ? this._tagInputWrapper.querySelector('.tag-input-wrapper__input') : null;
-        if (tagInput) {
-            const remaining = tagInput.value.trim().replace(/,/g, '');
-            if (remaining && !this._tags.some(t => t.label === remaining)) {
-                this._tags.push({ color: null, label: remaining });
-            }
+        if (this._tagInput) {
+            this._addTag(this._tagInput.value.replace(/,/g, ''), null, true);
         }
 
         // Build tags array, filtering out empty labels
         const tags = this._tags.filter(t => t.label);
-
-        this._closeColorPopup();
-        if (this._onDocumentClick) {
-            document.removeEventListener('mousedown', this._onDocumentClick);
-        }
 
         if (this.callbacks.onSave) {
             // Clear legacy tag property, replace with tags array

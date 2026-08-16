@@ -19,6 +19,9 @@ class AppStore {
      */
     init(loadedData) {
         this.state = loadedData || this._getEmptyState();
+        if (!this.state.tagLibrary || typeof this.state.tagLibrary !== 'object') {
+            this.state.tagLibrary = {};
+        }
         this._cleanupDuplicateItemIds();
         this._notify();
         eventBus.emit(Events.STATE_LOADED, this.state);
@@ -101,7 +104,8 @@ class AppStore {
             dashboards: {},
             lists: {},
             items: {},
-            dashboardOrder: []
+            dashboardOrder: [],
+            tagLibrary: {}
         };
     }
 
@@ -427,6 +431,11 @@ class AppStore {
         Object.assign(this.state.items[id], updates, {
             updatedAt: Date.now()
         });
+
+        // Remember any tags used so they can be suggested later
+        if (Array.isArray(updates.tags)) {
+            this._rememberTags(updates.tags);
+        }
 
         this._notify();
         this._triggerSave();
@@ -868,6 +877,128 @@ class AppStore {
             const item = this.state.items[id];
             return item && !item.deleted;
         }).length;
+    }
+
+    // =========================================================================
+    // TAG LIBRARY
+    // =========================================================================
+
+    /**
+     * Maximum number of remembered tags kept in the library
+     */
+    static TAG_LIBRARY_LIMIT = 200;
+
+    /**
+     * Normalize an item's tags, handling legacy formats
+     * @param {Object} item
+     * @returns {Array<{color: string|null, label: string}>}
+     */
+    static normalizeItemTags(item) {
+        if (!item) return [];
+        if (Array.isArray(item.tags)) {
+            return item.tags
+                .filter(t => t && typeof t === 'object')
+                .map(t => ({ color: t.color || null, label: (t.label || '').trim() }));
+        }
+        const tag = item.tag;
+        // Legacy: item.tag as a color string only (no label)
+        if (typeof tag === 'string') return [{ color: tag, label: '' }];
+        // Legacy: item.tag as {color, label}
+        if (tag && typeof tag === 'object') {
+            return [{ color: tag.color || null, label: (tag.label || '').trim() }];
+        }
+        return [];
+    }
+
+    /**
+     * Build the lookup key for a tag label (case-insensitive)
+     * @param {string} label
+     * @returns {string}
+     */
+    static tagKey(label) {
+        return (label || '').trim().toLowerCase();
+    }
+
+    /**
+     * Record tags in the library so they stay available as suggestions,
+     * even after every item using them is edited or deleted.
+     * @param {Array<{color: string|null, label: string}>} tags
+     */
+    _rememberTags(tags) {
+        if (!Array.isArray(tags)) return;
+        if (!this.state.tagLibrary) this.state.tagLibrary = {};
+
+        const now = Date.now();
+        tags.forEach(tag => {
+            if (!tag) return;
+            const label = (tag.label || '').trim();
+            if (!label) return;
+
+            this.state.tagLibrary[AppStore.tagKey(label)] = {
+                label,
+                color: tag.color || null,
+                lastUsed: now
+            };
+        });
+
+        this._pruneTagLibrary();
+    }
+
+    /**
+     * Keep the tag library from growing without bound (oldest entries drop first)
+     */
+    _pruneTagLibrary() {
+        const entries = Object.entries(this.state.tagLibrary);
+        if (entries.length <= AppStore.TAG_LIBRARY_LIMIT) return;
+
+        entries
+            .sort((a, b) => (b[1].lastUsed || 0) - (a[1].lastUsed || 0))
+            .slice(AppStore.TAG_LIBRARY_LIMIT)
+            .forEach(([key]) => delete this.state.tagLibrary[key]);
+    }
+
+    /**
+     * Get all previously used tags, most used first.
+     * Combines the remembered tag library with tags currently on items.
+     * @returns {Array<{label: string, color: string|null, count: number, lastUsed: number}>}
+     */
+    getKnownTags() {
+        const byKey = new Map();
+
+        const upsert = (label, color, lastUsed) => {
+            const trimmed = (label || '').trim();
+            if (!trimmed) return null;
+
+            const key = AppStore.tagKey(trimmed);
+            let entry = byKey.get(key);
+            if (!entry) {
+                entry = { label: trimmed, color: color || null, count: 0, lastUsed: 0 };
+                byKey.set(key, entry);
+            }
+            if (!entry.color && color) entry.color = color;
+            if (lastUsed > entry.lastUsed) entry.lastUsed = lastUsed;
+            return entry;
+        };
+
+        // Remembered tags (may no longer be attached to any item)
+        Object.values(this.state.tagLibrary || {}).forEach(t => {
+            if (t) upsert(t.label, t.color, t.lastUsed || 0);
+        });
+
+        // Tags currently in use across all active items
+        Object.values(this.state.items || {}).forEach(item => {
+            if (!item || item.deleted) return;
+            AppStore.normalizeItemTags(item).forEach(t => {
+                const entry = upsert(t.label, t.color, item.updatedAt || 0);
+                if (entry) entry.count++;
+            });
+        });
+
+        return Array.from(byKey.values()).sort((a, b) => {
+            if (b.count !== a.count) return b.count - a.count;
+            if (b.lastUsed !== a.lastUsed) return b.lastUsed - a.lastUsed;
+            return a.label.localeCompare(b.label);
+        });
     }
 
     // =========================================================================
