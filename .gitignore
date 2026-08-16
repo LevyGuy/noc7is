@@ -4,6 +4,7 @@
 
 # Storage directory contents (user data)
 storage/*.json
+storage/*.rev
 storage/rate_limits/
 
 # Keep the .htaccess file

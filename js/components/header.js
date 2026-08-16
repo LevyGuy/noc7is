@@ -104,6 +104,13 @@ class HeaderComponent {
         this._saveStatusUnsubscribe = eventBus.on(Events.SAVE_STATUS, (status) => {
             this._updateSaveStatus(status);
         });
+
+        // Multi-screen sync updates share the same indicator. A save in
+        // progress outranks them - it is the more urgent thing to report.
+        this._syncStatusUnsubscribe = eventBus.on(Events.SYNC_STATUS, (status) => {
+            if (this._lastSaveStatus === 'saving' || this._lastSaveStatus === 'error') return;
+            this._updateSaveStatus(status);
+        });
     }
 
     /**
@@ -164,8 +171,14 @@ class HeaderComponent {
     /**
      * Update save status display
      * @param {string} status - 'idle' | 'saving' | 'saved' | 'error'
+     *                          | 'synced' | 'merged' | 'offline'
      */
     _updateSaveStatus(status) {
+        // Remembered so sync messages don't paper over an in-progress save
+        if (['idle', 'saving', 'saved', 'error'].includes(status)) {
+            this._lastSaveStatus = status;
+        }
+
         const el = document.getElementById('save-status');
         if (!el) return;
 
@@ -173,11 +186,25 @@ class HeaderComponent {
             idle: '',
             saving: '\u21BB Saving...',
             saved: '\u2713 Saved',
-            error: '\u26A0 Save failed'
+            error: '\u26A0 Save failed',
+            synced: '',
+            merged: '\u21BB Updated from another screen',
+            offline: '\u26A0 Offline - changes saved locally'
         };
 
         Sanitize.text(el, statusMap[status] || '');
         el.className = `header__save-status header__save-status--${status}`;
+
+        // "Updated from another screen" is news, not a state - let it fade
+        if (this._mergedTimer) {
+            clearTimeout(this._mergedTimer);
+            this._mergedTimer = null;
+        }
+        if (status === 'merged') {
+            this._mergedTimer = setTimeout(() => {
+                this._updateSaveStatus(this._lastSaveStatus || 'idle');
+            }, 3000);
+        }
     }
 
     /**
@@ -198,6 +225,13 @@ class HeaderComponent {
     destroy() {
         if (this._saveStatusUnsubscribe) {
             this._saveStatusUnsubscribe();
+        }
+        if (this._syncStatusUnsubscribe) {
+            this._syncStatusUnsubscribe();
+        }
+        if (this._mergedTimer) {
+            clearTimeout(this._mergedTimer);
+            this._mergedTimer = null;
         }
         DOM.clear(this.container);
     }

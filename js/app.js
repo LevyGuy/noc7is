@@ -6,6 +6,7 @@ class App {
     constructor() {
         this.blindBase = new BlindBase('api.php');
         this.store = null;
+        this.syncManager = null;
         this.currentView = null;
         this.headerComponent = null;
         this.searchComponent = null;
@@ -89,6 +90,9 @@ class App {
 
                 this.store = new AppStore(this.blindBase);
                 this.store.init(data);
+
+                // Start watching for changes made on other tabs and devices
+                this.syncManager = new SyncManager(this.blindBase, this.store);
 
                 this._hideLoading();
                 router.navigate('/');
@@ -292,6 +296,11 @@ class App {
         if (this.store?.saveStatus === 'saving') {
             Toast.warning('Please wait for save to complete.');
             return;
+        }
+
+        if (this.syncManager) {
+            this.syncManager.destroy();
+            this.syncManager = null;
         }
 
         this.blindBase.logout();

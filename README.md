@@ -16,6 +16,7 @@ It allows you to manage tasks, projects, and ideas without ever exposing your da
 * ** Fully Responsive:** Works on desktop, tablet, and mobile browsers.
 * ** Lightweight:** Built with **zero** external frontend libraries. No React, no Vue, no jQuery, no npm bloat.
 * ** Auto-Save:** Changes are transparently encrypted and synced to the server in the background.
+* ** Multi-Screen Sync:** Open the same account on several tabs or devices. Changes appear on the other screens within seconds, and simultaneous edits are merged instead of overwriting each other.
 
 * Add Dashboard 
 ![Add Dashboard](/screenshots/add_dashboard.png)
@@ -51,6 +52,18 @@ Authentication and encryption are both derived from your password, client-side:
 * The second half is an **auth token** sent to the server to prove you know the password. The server stores only a hash of it and verifies it (constant-time) before any read or write. Because the two halves are independent PBKDF2 blocks, the auth token reveals nothing about the encryption key without the password.
 
 This means a request cannot read or overwrite another account's vault without the password, and a leak of the server's stored files (verifier hashes + ciphertext) is no easier to crack than the encrypted data itself.
+
+### Multiple screens at once
+
+Each vault carries a revision number. A save declares which revision it was based on, and the server rejects it if another screen has written since — so no screen can silently overwrite another's work. The rejected screen merges the other version into its own and writes again.
+
+The merge runs **in the browser**, because it has to: the server only ever holds ciphertext and cannot combine two versions itself. Records are reconciled individually by their last-modified time, so edits to different cards, lists, or boards all survive. Deletes are tombstones and win over stale peers. If two screens edit the *same* card at the same moment, the later edit wins outright — there is no text-level merge.
+
+Keeping screens current adds nothing to what the server knows:
+
+* Tabs in one browser notify each other over a `BroadcastChannel` carrying **only a username and a revision number** — never vault contents and never keys. Each tab fetches and decrypts with its own key, so a tab signed in as a different account learns nothing.
+* Other devices poll a `rev` endpoint that returns just the revision number, and only to a caller who passes the same authentication a read requires. One tab per browser does the polling, and it pauses while the page is hidden.
+* The revision counter is plaintext, but it reveals no more than the storage file's modification time already did.
 
 ### What zero-knowledge does and does not protect
 
