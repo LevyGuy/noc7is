@@ -411,7 +411,7 @@ class FolderPanelComponent {
             onUnsnooze: () => {
                 this.store.unsnoozeItem(this.folderId);
             }
-        });
+        }, { store: this.store });
     }
 
     /**

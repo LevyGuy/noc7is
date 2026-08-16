@@ -619,6 +619,10 @@
 .item__tag-label--pink { background: var(--tag-pink); color: white; }
 
 /* Tag Chip Input (used in ItemDetailModal) */
+.tag-field {
+    position: relative;
+}
+
 .tag-input-wrapper {
     display: flex;
     flex-wrap: wrap;
@@ -649,6 +653,93 @@
 }
 
 .tag-input-wrapper__input::placeholder {
+    color: var(--color-text-secondary);
+}
+
+.tag-input-wrapper__toggle {
+    flex-shrink: 0;
+    padding: 0 4px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    font-size: var(--font-sm);
+    line-height: 1;
+    border-radius: var(--radius-sm);
+    transition: color var(--transition-fast);
+}
+
+.tag-input-wrapper__toggle:hover {
+    color: var(--color-text);
+}
+
+/* Saved tag suggestions dropdown */
+.tag-suggestions {
+    position: fixed;
+    z-index: 1000;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg);
+    padding: var(--space-xs);
+    max-height: 220px;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+
+.tag-suggestions__option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    width: 100%;
+    padding: 6px 8px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--color-text);
+    font-size: var(--font-sm);
+    text-align: left;
+}
+
+.tag-suggestions__option:hover,
+.tag-suggestions__option--active {
+    background: var(--color-bg);
+}
+
+.tag-suggestions__label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tag-suggestions__count {
+    flex-shrink: 0;
+    font-size: var(--font-xs);
+    color: var(--color-text-secondary);
+}
+
+.tag-suggestions__dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--color-border);
+}
+
+.tag-suggestions__dot--red { background: var(--tag-red); }
+.tag-suggestions__dot--orange { background: var(--tag-orange); }
+.tag-suggestions__dot--yellow { background: var(--tag-yellow); }
+.tag-suggestions__dot--green { background: var(--tag-green); }
+.tag-suggestions__dot--teal { background: var(--tag-teal); }
+.tag-suggestions__dot--blue { background: var(--tag-blue); }
+.tag-suggestions__dot--purple { background: var(--tag-purple); }
+.tag-suggestions__dot--pink { background: var(--tag-pink); }
+
+.tag-suggestions__hint {
+    padding: 6px 8px;
+    font-size: var(--font-xs);
     color: var(--color-text-secondary);
 }
 
