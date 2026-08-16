@@ -3,14 +3,107 @@
  * Central state management with persistence to BlindBase
  */
 class AppStore {
+    /**
+     * How many times a save will merge-and-retry before giving up. Each retry
+     * follows a rejected write, so this only bounds a pathological loop where
+     * other screens keep winning the race.
+     */
+    static MAX_CONFLICT_RETRIES = 5;
+
     constructor(blindBaseClient) {
         this.client = blindBaseClient;
         this.state = null;
         this.subscribers = new Set();
         this.saveStatus = 'idle'; // idle | saving | saved | error
 
+        // Concurrency bookkeeping for multi-screen sync
+        this._saveInFlight = false;   // a request is on the wire right now
+        this._saveQueued = false;     // changes arrived while that request ran
+        this._dirty = false;          // local edits not yet accepted by the server
+
+        // Remote updates are held back while the user is mid-gesture, because
+        // views re-render by replacing their DOM wholesale - applying an update
+        // mid-drag or mid-edit would yank the elements out from under them.
+        this._interactionDepth = 0;
+        this._deferredRemote = null;
+        this._deferredNotify = false;
+
         // Debounced save function (2 second delay)
         this._debouncedSave = debounce(() => this._persistState(), 2000);
+
+        this._watchInteractions();
+    }
+
+    /**
+     * Track gestures that must not be interrupted by an incoming update
+     */
+    _watchInteractions() {
+        const begin = () => { this._interactionDepth++; };
+        const end = () => {
+            this._interactionDepth = Math.max(0, this._interactionDepth - 1);
+            if (this._interactionDepth === 0) this._flushDeferred();
+        };
+
+        eventBus.on(Events.DRAG_START, begin);
+        eventBus.on(Events.DRAG_END, end);
+        eventBus.on(Events.MODAL_OPEN, begin);
+        eventBus.on(Events.MODAL_CLOSE, end);
+    }
+
+    /**
+     * Longest an incoming update is held back waiting for the user to finish.
+     *
+     * A safety net, not a normal path: if some component ever opened without
+     * closing, the counter would never return to zero and this screen would
+     * quietly stop accepting other screens' changes. Better to redraw during an
+     * unusually long gesture than to silently stop syncing.
+     */
+    static MAX_DEFERRAL_MS = 15000;
+
+    /**
+     * Apply anything that was held back while the user was busy
+     */
+    _flushDeferred() {
+        if (this._deferralTimer) {
+            clearTimeout(this._deferralTimer);
+            this._deferralTimer = null;
+        }
+
+        const deferred = this._deferredRemote;
+        this._deferredRemote = null;
+
+        if (deferred) {
+            this._interactionDepth = 0; // forced flush must not re-defer
+            this.applyRemoteState(deferred.state, deferred.rev);
+            return;
+        }
+
+        if (this._deferredNotify) {
+            this._deferredNotify = false;
+            this._notify();
+        }
+    }
+
+    /**
+     * @private
+     */
+    _armDeferralTimeout() {
+        if (this._deferralTimer) return;
+        this._deferralTimer = setTimeout(() => {
+            this._deferralTimer = null;
+            this._flushDeferred();
+        }, AppStore.MAX_DEFERRAL_MS);
+    }
+
+    /**
+     * Re-render now, or as soon as the user is no longer mid-gesture
+     */
+    _notifyWhenIdle() {
+        if (this._interactionDepth > 0) {
+            this._deferredNotify = true;
+            return;
+        }
+        this._notify();
     }
 
     /**
@@ -21,6 +114,9 @@ class AppStore {
         this.state = loadedData || this._getEmptyState();
         if (!this.state.tagLibrary || typeof this.state.tagLibrary !== 'object') {
             this.state.tagLibrary = {};
+        }
+        if (typeof this.state.orderUpdatedAt !== 'number') {
+            this.state.orderUpdatedAt = 0;
         }
         this._cleanupDuplicateItemIds();
         this._notify();
@@ -105,8 +201,28 @@ class AppStore {
             lists: {},
             items: {},
             dashboardOrder: [],
+            orderUpdatedAt: 0,
             tagLibrary: {}
         };
+    }
+
+    /**
+     * Stamp records as modified now.
+     *
+     * Every mutation must timestamp both the record it changed and the record
+     * that owns the ordering it changed: when two screens edit at once, these
+     * stamps are the only thing that decides whose version of each record wins
+     * (see StateMerge). An unstamped mutation is one that can be silently lost.
+     *
+     * @param {...(Object|null|undefined)} records - Records to stamp
+     * @returns {number} The timestamp applied
+     */
+    _touch(...records) {
+        const now = Date.now();
+        records.forEach(record => {
+            if (record) record.updatedAt = now;
+        });
+        return now;
     }
 
     // =========================================================================
@@ -141,36 +257,162 @@ class AppStore {
      * Trigger save operation (debounced)
      */
     _triggerSave() {
+        this._dirty = true;
         this.saveStatus = 'saving';
         eventBus.emit(Events.SAVE_STATUS, this.saveStatus);
         this._debouncedSave();
     }
 
     /**
-     * Persist state to BlindBase
+     * Persist state to BlindBase.
+     *
+     * Writes are revision-checked by the server. If another screen wrote first
+     * the write comes back rejected, carrying that screen's version; we merge it
+     * into ours and try again at the new revision. That loop - not a bigger lock
+     * - is what stops two screens from overwriting each other.
      */
     async _persistState() {
-        try {
-            await this.client.save(this.state);
-            this.saveStatus = 'saved';
-            eventBus.emit(Events.SAVE_STATUS, this.saveStatus);
-
-            // Reset to idle after 2 seconds
-            setTimeout(() => {
-                if (this.saveStatus === 'saved') {
-                    this.saveStatus = 'idle';
-                    eventBus.emit(Events.SAVE_STATUS, this.saveStatus);
-                }
-            }, 2000);
-        } catch (error) {
-            console.error('Save failed:', error);
-            this.saveStatus = 'error';
-            eventBus.emit(Events.SAVE_STATUS, this.saveStatus);
-            eventBus.emit(Events.SAVE_ERROR, error);
-
-            // Retry after 5 seconds
-            setTimeout(() => this._debouncedSave(), 5000);
+        // Never let two writes overlap: they would race to be the one holding
+        // the current revision and generate conflicts against each other.
+        if (this._saveInFlight) {
+            this._saveQueued = true;
+            return;
         }
+
+        this._saveInFlight = true;
+
+        try {
+            for (let attempt = 0; attempt <= AppStore.MAX_CONFLICT_RETRIES; attempt++) {
+                try {
+                    await this.client.save(this.state);
+                    this._onSaveSucceeded();
+                    return;
+                } catch (error) {
+                    if (!AppStore._isConflict(error)) throw error;
+                    this._resolveConflict(error);
+                }
+            }
+
+            throw new Error('Could not merge concurrent changes after several attempts.');
+        } catch (error) {
+            this._onSaveFailed(error);
+        } finally {
+            this._saveInFlight = false;
+
+            if (this._saveQueued) {
+                this._saveQueued = false;
+                this._debouncedSave();
+            }
+        }
+    }
+
+    /**
+     * @private
+     */
+    static _isConflict(error) {
+        return error && error.code === 'REV_CONFLICT';
+    }
+
+    /**
+     * Fold another screen's version into ours after a rejected write.
+     *
+     * The server hands back its current revision and contents with the
+     * rejection, so this needs no extra round trip.
+     * @private
+     */
+    _resolveConflict(error) {
+        if (error.remoteState) {
+            const { state, changed } = StateMerge.merge(this.state, error.remoteState);
+            this.state = state;
+            this._cleanupDuplicateItemIds();
+
+            if (changed) {
+                this._notifyWhenIdle();
+                eventBus.emit(Events.REMOTE_UPDATE, this.state);
+            }
+        }
+
+        // Retry on top of the revision we just merged
+        this.client.rev = error.rev;
+        eventBus.emit(Events.SYNC_STATUS, 'merged');
+    }
+
+    /**
+     * @private
+     */
+    _onSaveSucceeded() {
+        this._dirty = false;
+        this.saveStatus = 'saved';
+        eventBus.emit(Events.SAVE_STATUS, this.saveStatus);
+
+        // Tell other screens in this browser to pull, so they update now
+        // instead of waiting for their next poll.
+        eventBus.emit(Events.SAVE_COMMITTED, this.client.rev);
+
+        // Reset to idle after 2 seconds
+        setTimeout(() => {
+            if (this.saveStatus === 'saved') {
+                this.saveStatus = 'idle';
+                eventBus.emit(Events.SAVE_STATUS, this.saveStatus);
+            }
+        }, 2000);
+    }
+
+    /**
+     * @private
+     */
+    _onSaveFailed(error) {
+        console.error('Save failed:', error);
+        this.saveStatus = 'error';
+        eventBus.emit(Events.SAVE_STATUS, this.saveStatus);
+        eventBus.emit(Events.SAVE_ERROR, error);
+
+        // Retry after 5 seconds
+        setTimeout(() => this._debouncedSave(), 5000);
+    }
+
+    /**
+     * Merge a version of the vault fetched from the server into this screen.
+     *
+     * Called when another screen reports a change. Local edits that have not
+     * been saved yet survive the merge and are written out afterwards.
+     *
+     * @param {Object} remoteState - Decrypted state from the server
+     * @param {number} [rev] - Revision that state represents
+     * @returns {boolean} True if applied, false if held back for now
+     */
+    applyRemoteState(remoteState, rev) {
+        if (!this.state || !remoteState) return true;
+
+        // Hold it back rather than re-render out from under a drag or a modal
+        if (this._interactionDepth > 0) {
+            this._deferredRemote = { state: remoteState, rev };
+            this._armDeferralTimeout();
+            return false;
+        }
+
+        const { state, changed } = StateMerge.merge(this.state, remoteState);
+        this.state = state;
+
+        // Only move forward: our own save may have advanced past this snapshot
+        if (typeof rev === 'number' && rev > this.client.rev) {
+            this.client.rev = rev;
+        }
+
+        this._cleanupDuplicateItemIds();
+
+        if (changed) {
+            this._notify();
+            eventBus.emit(Events.REMOTE_UPDATE, this.state);
+            eventBus.emit(Events.SYNC_STATUS, 'merged');
+        }
+
+        // Local edits preserved by the merge still need to reach the server
+        if (this._dirty) {
+            this._triggerSave();
+        }
+
+        return true;
     }
 
     // =========================================================================
@@ -191,9 +433,11 @@ class AppStore {
             title: title.trim(),
             listIds: [],
             deleted: false,
-            createdAt: now
+            createdAt: now,
+            updatedAt: now
         };
         this.state.dashboardOrder.push(id);
+        this.state.orderUpdatedAt = now;
 
         this._notify();
         this._triggerSave();
@@ -209,6 +453,7 @@ class AppStore {
         if (!this.state.dashboards[id]) return;
 
         Object.assign(this.state.dashboards[id], updates);
+        this._touch(this.state.dashboards[id]);
 
         this._notify();
         this._triggerSave();
@@ -221,13 +466,16 @@ class AppStore {
     deleteDashboard(id) {
         if (!this.state.dashboards[id]) return;
 
-        this.state.dashboards[id].deleted = true;
-
-        // Also soft delete all lists and items in this dashboard
         const dashboard = this.state.dashboards[id];
+        dashboard.deleted = true;
+        this._touch(dashboard);
+
+        // Also soft delete all lists and items in this dashboard. Each cascaded
+        // tombstone is stamped too, so another screen's stale copy cannot win.
         dashboard.listIds.forEach(listId => {
             if (this.state.lists[listId]) {
                 this.state.lists[listId].deleted = true;
+                this._touch(this.state.lists[listId]);
                 this.state.lists[listId].itemIds.forEach(itemId => {
                     if (this.state.items[itemId]) {
                         const item = this.state.items[itemId];
@@ -236,10 +484,12 @@ class AppStore {
                             item.subItemIds.forEach(subId => {
                                 if (this.state.items[subId]) {
                                     this.state.items[subId].deleted = true;
+                                    this._touch(this.state.items[subId]);
                                 }
                             });
                         }
                         item.deleted = true;
+                        this._touch(item);
                     }
                 });
             }
@@ -255,6 +505,7 @@ class AppStore {
      */
     reorderDashboards(newOrder) {
         this.state.dashboardOrder = newOrder;
+        this.state.orderUpdatedAt = Date.now();
 
         this._notify();
         this._triggerSave();
@@ -282,9 +533,11 @@ class AppStore {
             title: title.trim(),
             itemIds: [],
             deleted: false,
-            createdAt: now
+            createdAt: now,
+            updatedAt: now
         };
         dashboard.listIds.push(id);
+        this._touch(dashboard);
 
         this._notify();
         this._triggerSave();
@@ -300,6 +553,7 @@ class AppStore {
         if (!this.state.lists[id]) return;
 
         Object.assign(this.state.lists[id], updates);
+        this._touch(this.state.lists[id]);
 
         this._notify();
         this._triggerSave();
@@ -313,6 +567,7 @@ class AppStore {
         if (!this.state.lists[id]) return;
 
         this.state.lists[id].deleted = true;
+        this._touch(this.state.lists[id]);
 
         // Also soft delete all items in this list
         this.state.lists[id].itemIds.forEach(itemId => {
@@ -323,10 +578,12 @@ class AppStore {
                     item.subItemIds.forEach(subId => {
                         if (this.state.items[subId]) {
                             this.state.items[subId].deleted = true;
+                            this._touch(this.state.items[subId]);
                         }
                     });
                 }
                 item.deleted = true;
+                this._touch(item);
             }
         });
 
@@ -360,6 +617,9 @@ class AppStore {
             toDashboard.listIds.splice(newIndex, 0, listId);
         }
 
+        // Both dashboards changed their ordering, and so did the list's home
+        this._touch(fromDashboard, toDashboard, this.state.lists[listId]);
+
         this._notify();
         this._triggerSave();
     }
@@ -376,6 +636,7 @@ class AppStore {
 
         const [removed] = dashboard.listIds.splice(oldIndex, 1);
         dashboard.listIds.splice(newIndex, 0, removed);
+        this._touch(dashboard);
 
         this._notify();
         this._triggerSave();
@@ -414,6 +675,7 @@ class AppStore {
         } else {
             list.itemIds.push(id);
         }
+        this._touch(list);
 
         this._notify();
         this._triggerSave();
@@ -517,6 +779,7 @@ class AppStore {
             const index = list.itemIds.indexOf(itemId);
             if (index > -1) {
                 list.itemIds.splice(index, 1);
+                this._touch(list);
             }
         }
 
@@ -526,6 +789,7 @@ class AppStore {
             const index = item.subItemIds.indexOf(itemId);
             if (index > -1) {
                 item.subItemIds.splice(index, 1);
+                this._touch(item);
             }
         }
 
@@ -538,7 +802,7 @@ class AppStore {
             }
         }
 
-        this.state.items[itemId].updatedAt = Date.now();
+        this._touch(toList, this.state.items[itemId]);
 
         this._notify();
         this._triggerSave();
@@ -556,6 +820,7 @@ class AppStore {
 
         const [removed] = list.itemIds.splice(oldIndex, 1);
         list.itemIds.splice(newIndex, 0, removed);
+        this._touch(list);
 
         this._notify();
         this._triggerSave();
@@ -600,6 +865,10 @@ class AppStore {
             this.state.items[itemId].updatedAt = now;
         });
 
+        // Both lists changed their contents
+        fromList.updatedAt = now;
+        toList.updatedAt = now;
+
         this._notify();
         this._triggerSave();
 
@@ -640,6 +909,7 @@ class AppStore {
         } else {
             list.itemIds.push(id);
         }
+        this._touch(list);
 
         this._notify();
         this._triggerSave();
@@ -703,6 +973,7 @@ class AppStore {
             const index = list.itemIds.indexOf(itemId);
             if (index > -1) {
                 list.itemIds.splice(index, 1);
+                this._touch(list);
             }
         }
 
@@ -712,6 +983,7 @@ class AppStore {
             const index = otherItem.subItemIds.indexOf(itemId);
             if (index > -1) {
                 otherItem.subItemIds.splice(index, 1);
+                this._touch(otherItem);
             }
         }
 
@@ -765,6 +1037,7 @@ class AppStore {
         const now = Date.now();
         this.state.items[itemId].updatedAt = now;
         folder.updatedAt = now;
+        targetList.updatedAt = now;
 
         this._notify();
         this._triggerSave();
@@ -794,6 +1067,7 @@ class AppStore {
 
         // Insert sub-items at folder's position (replacing the folder)
         list.itemIds.splice(folderIndex, 1, ...activeSubItemIds);
+        list.updatedAt = now;
 
         // Update timestamps
         activeSubItemIds.forEach(id => {
@@ -1139,6 +1413,7 @@ class AppStore {
         if (!this.state.lists[id]) return;
 
         this.state.lists[id].snoozedUntil = until;
+        this._touch(this.state.lists[id]);
 
         this._notify();
         this._triggerSave();
@@ -1152,6 +1427,7 @@ class AppStore {
         if (!this.state.lists[id]) return;
 
         this.state.lists[id].snoozedUntil = null;
+        this._touch(this.state.lists[id]);
 
         this._notify();
         this._triggerSave();

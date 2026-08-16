@@ -209,6 +209,16 @@
     color: #ffcdd2;
 }
 
+/* Changes pulled in from another tab or device */
+.header__save-status--merged {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* Server unreachable: edits are held locally and retried */
+.header__save-status--offline {
+    color: #ffe0b2;
+}
+
 .header__logout {
     padding: var(--space-xs) var(--space-md);
     color: white;

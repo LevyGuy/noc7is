@@ -100,6 +100,11 @@ const Events = {
     SAVE_STATUS: 'save:status',
     SAVE_ERROR: 'save:error',
 
+    // Multi-screen sync events
+    SAVE_COMMITTED: 'sync:committed',  // our write landed; payload is the new revision
+    SYNC_STATUS: 'sync:status',        // 'synced' | 'merged' | 'offline'
+    REMOTE_UPDATE: 'sync:remote',      // another screen's changes were merged in
+
     // Navigation events
     ROUTE_CHANGED: 'route:changed',
 

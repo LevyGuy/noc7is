@@ -12,6 +12,22 @@
  *   await vault.save({ myData: 'encrypted' });
  *   vault.logout();
  */
+/**
+ * Raised when a save is rejected because another session wrote first.
+ *
+ * Carries the server's current revision and the *decrypted* remote state, so
+ * the caller can merge without ever handling ciphertext itself.
+ */
+class ConflictError extends Error {
+    constructor(rev, remoteState) {
+        super('Vault was modified by another session');
+        this.name = 'ConflictError';
+        this.code = 'REV_CONFLICT';
+        this.rev = rev;
+        this.remoteState = remoteState;
+    }
+}
+
 class BlindBase {
     /**
      * Create a new BlindBase client instance
@@ -23,6 +39,7 @@ class BlindBase {
         this.authToken = null;  // Auth proof - derived from password, sent to authenticate
         this.username = null;
         this.salt = null;
+        this.rev = 0;           // Revision this client's snapshot is based on
 
         // Configuration
         this.config = {
@@ -68,8 +85,15 @@ class BlindBase {
 
     /**
      * Save data to the vault
+     *
+     * The write declares the revision it was based on. If another session has
+     * written since, the server refuses it and this throws a ConflictError
+     * carrying the current revision and the decrypted remote state - never a
+     * silent overwrite of the other session's work.
+     *
      * @param {object|string} data - Data to encrypt and save
-     * @returns {Promise<object>} Server response with status and updated_at
+     * @returns {Promise<object>} Server response with status, rev and updated_at
+     * @throws {ConflictError} If the vault moved on since this client loaded it
      * @throws {Error} If vault is locked or save fails
      */
     async save(data) {
@@ -82,13 +106,52 @@ class BlindBase {
         formData.append('user', this.username);
         formData.append('payload', encrypted);
         formData.append('auth', this.authToken);
+        formData.append('base_rev', String(this.rev));
 
         const response = await this._fetch(`${this.apiUrl}?action=save`, {
             method: 'POST',
             body: formData
         });
 
-        return this._handleResponse(response);
+        const result = await response.json();
+
+        if (result.error && result.error.code === 'REV_CONFLICT') {
+            throw new ConflictError(
+                Number(result.rev) || 0,
+                result.data ? await this._decryptState(result.data) : null
+            );
+        }
+
+        if (result.error) {
+            const error = new Error(result.error.message || 'API error');
+            error.code = result.error.code;
+            error.status = response.status;
+            throw error;
+        }
+
+        this.rev = Number(result.rev) || 0;
+        return result;
+    }
+
+    /**
+     * Fetch the vault's current revision without downloading the vault.
+     *
+     * Used to poll for changes made on other devices. Requires the same
+     * authentication as a read - the revision is only disclosed to a caller
+     * who could already load the data.
+     *
+     * @returns {Promise<number>} Current server revision
+     */
+    async fetchRev() {
+        this._requireUnlocked();
+
+        const response = await this._fetch(
+            `${this.apiUrl}?action=rev&user=${encodeURIComponent(this.username)}`,
+            { headers: { 'X-Auth-Token': this.authToken } }
+        );
+        const result = await this._handleResponse(response);
+
+        return Number(result.rev) || 0;
     }
 
     /**
@@ -106,16 +169,15 @@ class BlindBase {
         });
         const result = await this._handleResponse(response);
 
+        // Track the revision this snapshot represents so the next save can
+        // prove it was not built on stale data.
+        this.rev = Number(result.rev) || 0;
+
         if (!result.data) {
             return null;
         }
 
-        try {
-            const decrypted = await this._decrypt(result.data);
-            return JSON.parse(decrypted);
-        } catch (e) {
-            throw new Error('Decryption failed. Invalid password or corrupted data.');
-        }
+        return this._decryptState(result.data);
     }
 
     /**
@@ -127,6 +189,7 @@ class BlindBase {
         this.authToken = null;
         this.username = null;
         this.salt = null;
+        this.rev = 0;
         location.reload();
     }
 
@@ -236,6 +299,18 @@ class BlindBase {
     }
 
     /**
+     * Decrypt a stored payload and parse it back into state
+     * @private
+     */
+    async _decryptState(ciphertext) {
+        try {
+            return JSON.parse(await this._decrypt(ciphertext));
+        } catch (e) {
+            throw new Error('Decryption failed. Invalid password or corrupted data.');
+        }
+    }
+
+    /**
      * Decrypt ciphertext using AES-256-GCM
      * @private
      */
@@ -329,7 +404,9 @@ class BlindBase {
 // Export for different module systems
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = BlindBase;
+    module.exports.ConflictError = ConflictError;
 }
 if (typeof window !== 'undefined') {
     window.BlindBase = BlindBase;
+    window.ConflictError = ConflictError;
 }
