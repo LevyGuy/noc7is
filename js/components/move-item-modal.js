@@ -1,18 +1,21 @@
 /**
  * Move Item Modal Component
- * Modal for moving a single item to a different dashboard and list
+ * Modal for moving a single item or folder to a different dashboard and list
  */
 class MoveItemModal {
     /**
      * Create and show move item modal
      * @param {AppStore} store
-     * @param {string} itemId - Item to move
+     * @param {string} itemId - Item or folder to move
      * @param {string} currentDashboardId - Current dashboard containing the item
+     * @param {Object} [options]
+     * @param {Function} [options.onMoved] - Called after a successful move
      */
-    constructor(store, itemId, currentDashboardId) {
+    constructor(store, itemId, currentDashboardId, options = {}) {
         this.store = store;
         this.itemId = itemId;
         this.currentDashboardId = currentDashboardId;
+        this.onMoved = options.onMoved || null;
         this.selectedDashboardId = null;
         this.selectedListId = null;
 
@@ -26,6 +29,8 @@ class MoveItemModal {
         const item = this.store.getItem(this.itemId);
         if (!item) return;
 
+        this.isFolder = item.type === 'folder';
+
         const dashboards = this.store.getActiveDashboards();
 
         if (dashboards.length === 0) {
@@ -35,7 +40,9 @@ class MoveItemModal {
 
         const content = DOM.create('div', {}, [
             DOM.create('p', { style: { marginBottom: 'var(--space-md)' } }, [
-                `Move "${item.title}" to:`
+                this.isFolder
+                    ? `Move folder "${item.title}" (and its items) to:`
+                    : `Move "${item.title}" to:`
             ]),
             // Dashboard selection
             DOM.create('div', { className: 'form-group' }, [
@@ -50,7 +57,7 @@ class MoveItemModal {
         ]);
 
         this.modal = new Modal({
-            title: 'Move Item',
+            title: this.isFolder ? 'Move Folder' : 'Move Item',
             content,
             buttons: [
                 {
@@ -65,6 +72,12 @@ class MoveItemModal {
                 }
             ]
         });
+
+        // Fall back to the first dashboard when the current one is unknown
+        // (e.g. the caller could not resolve the containing dashboard)
+        if (!dashboards.some(d => d.id === this.currentDashboardId)) {
+            this.currentDashboardId = dashboards[0].id;
+        }
 
         this._renderDashboardOptions(dashboards);
     }
@@ -208,7 +221,7 @@ class MoveItemModal {
         const currentListId = this.store.findListContainingItem(this.itemId);
 
         if (this.selectedListId === currentListId) {
-            Toast.info('Item is already in that list.');
+            Toast.info(this.isFolder ? 'Folder is already in that list.' : 'Item is already in that list.');
             modal.close();
             return;
         }
@@ -221,6 +234,10 @@ class MoveItemModal {
 
         Toast.success(`Moved "${item.title}" to "${targetList.title}" in "${targetDashboard.title}".`);
         modal.close();
+
+        if (this.onMoved) {
+            this.onMoved(this.selectedListId, this.selectedDashboardId);
+        }
     }
 }
 

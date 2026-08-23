@@ -341,6 +341,13 @@ class FolderPanelComponent {
             }, ['Edit Folder Details']),
             DOM.create('button', {
                 className: 'dropdown-menu__item',
+                onClick: () => {
+                    menu.remove();
+                    this._moveFolder();
+                }
+            }, ['Move to Dashboard']),
+            DOM.create('button', {
+                className: 'dropdown-menu__item',
                 onClick: async () => {
                     menu.remove();
                     await this._ungroupFolder();
@@ -410,8 +417,26 @@ class FolderPanelComponent {
             },
             onUnsnooze: () => {
                 this.store.unsnoozeItem(this.folderId);
+            },
+            onMove: () => {
+                this._moveFolder();
             }
         }, { store: this.store });
+    }
+
+    /**
+     * Move this folder (with all its sub-items) to another dashboard / list
+     */
+    _moveFolder() {
+        const currentDashboardId = this.store.findDashboardContainingList(this.listId);
+
+        new MoveItemModal(this.store, this.folderId, currentDashboardId, {
+            onMoved: () => {
+                // The folder now lives in another list (possibly on another
+                // dashboard), so this panel's list context is stale.
+                this.close();
+            }
+        });
     }
 
     /**
